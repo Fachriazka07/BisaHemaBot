@@ -1,0 +1,37 @@
+{
+  "name": "bisahemat-bot",
+  "version": "1.0.0",
+  "description": "BisaHemat — Telegram finance tracking bot",
+  "main": "dist/bot.js",
+  "scripts": {
+    "dev": "nodemon --watch src --ext ts --exec ts-node src/bot.ts",
+    "build": "tsc",
+    "start": "node dist/bot.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint src --ext .ts",
+    "format": "prettier --write src/**/*.ts"
+  },
+  "keywords": ["telegram", "bot", "finance", "grammy"],
+  "author": "Fachri",
+  "license": "ISC",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.112.3",
+    "dotenv": "^17.4.2",
+    "grammy": "^1.45.1",
+    "node-cron": "^4.6.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.2.0",
+    "@types/node-cron": "^3.0.11",
+    "@typescript-eslint/eslint-plugin": "^8.67.0",
+    "@typescript-eslint/parser": "^8.67.0",
+    "eslint": "^10.9.0",
+    "eslint-config-prettier": "^10.1.8",
+    "nodemon": "^3.1.14",
+    "prettier": "^3.9.6",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.8.3",
+    "vitest": "^4.1.11"
+  }
+}
