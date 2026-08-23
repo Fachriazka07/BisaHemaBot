@@ -1,6 +1,11 @@
 import { webhookCallback } from 'grammy';
 import { bot } from '../src/bot';
 
-// Vercel Serverless Function — handles Telegram webhook updates
-// POST /api/webhook — receives updates from Telegram
-export default webhookCallback(bot, 'std/http');
+const handleWebhook = webhookCallback(bot, 'next-js');
+
+export default async function handler(req: any, res: any) {
+  if (req.method === 'GET') {
+    return res.status(200).send('✅ BisaHemat Bot Webhook is active!');
+  }
+  return handleWebhook(req, res);
+}
