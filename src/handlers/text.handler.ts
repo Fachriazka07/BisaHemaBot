@@ -1,10 +1,13 @@
 import type { Context } from 'grammy';
-import { parseTextInput } from '../utils/parser';
+import { InlineKeyboard } from 'grammy';
+import { parseTextInput, parseAmount } from '../utils/parser';
 import {
   buildTransactionConfirm,
   buildTransferConfirm,
   buildWalletNotFoundMessage,
   buildSaldoMessage,
+  formatCurrency,
+  formatProgressBar,
   MSG_INVALID_AMOUNT,
   MSG_UNKNOWN_INPUT,
 } from '../utils/formatter';
@@ -20,71 +23,58 @@ import {
   createTransfer,
   WalletNotFoundError,
 } from '../services/transaction.service';
-import { getAllWallets } from '../services/wallet.service';
+import {
+  getAllWallets,
+  createWallet,
+  updateWalletBalance,
+  renameWallet,
+} from '../services/wallet.service';
+import {
+  createCategory,
+  updateCategory,
+} from '../services/category.service';
+import {
+  createGoal,
+  addDeposit,
+} from '../services/savings.service';
+import { upsertReminder } from '../services/reminder.service';
+import { generateReport } from '../services/report.service';
+import { getBudgetStatus } from '../services/budget.service';
+import { getExpensePieChartUrl } from '../services/chart.service';
+import { buildDashboard } from '../services/dashboard.service';
+import { consumeAwaitingInput } from './callback.handler';
 
-// ─────────────────────────────────────────────────────────
-// TEXT SHORTCUTS MAP
-// Ketik "menu" atau "saldo" tanpa "/" juga bisa
-// ─────────────────────────────────────────────────────────
-
-const TEXT_SHORTCUTS: Record<string, string> = {
-  menu: '/menu',
-  saldo: '/saldo',
-  laporan: '/laporan',
-  help: '/help',
-  bantuan: '/help',
-  chart: '/chart',
-  grafik: '/chart',
-  dompet: '/dompet',
-  kategori: '/kategori',
-  budget: '/budget',
-  goals: '/goals',
-  goal: '/goals',
-  batal: '/batal',
-  export: '/export',
-  reminder: '/reminder',
-};
+const SEP = '━━━━━━━━━━━━━━━━━━━━';
 
 // ─────────────────────────────────────────────────────────
 // TEXT HANDLER
-// Menangani quick text input: keluar/masuk/transfer + shortcuts
+// Menangani: awaiting input → text shortcuts → quick transactions
 // ─────────────────────────────────────────────────────────
 
 export async function handleTextInput(ctx: Context): Promise<void> {
   const text = ctx.message?.text;
   if (!text || !ctx.from) return;
+  const userId = ctx.from.id;
 
-  // ── TEXT SHORTCUT CHECK ───────────────────
-  const firstWord = text.trim().split(/\s+/)[0]?.toLowerCase() ?? '';
-  const shortcut = TEXT_SHORTCUTS[firstWord];
-  if (shortcut) {
-    // Rewrite message text as command and re-route
-    if (firstWord === 'menu') {
-      await ctx.reply('╔══ *MENU UTAMA* ══╗\nPilih fitur:', {
-        parse_mode: 'Markdown',
-        reply_markup: mainMenuKeyboard(),
-      });
-      return;
-    }
-    if (firstWord === 'saldo') {
-      const wallets = await getAllWallets(ctx.from.id);
-      await ctx.reply(buildSaldoMessage(wallets));
-      return;
-    }
-    // For all other shortcuts, inform user of the command
-    await ctx.reply(`💡 Gunakan command: \`${shortcut}\`\nKetik langsung perintahnya.`, { parse_mode: 'Markdown' });
+  // ── 1. CHECK AWAITING INPUT (from inline keyboard) ───
+  const pending = consumeAwaitingInput(userId);
+  if (pending) {
+    await handleAwaitingInput(ctx, pending.action, pending.data, text.trim());
     return;
   }
 
+  // ── 2. TEXT SHORTCUTS (ketik tanpa "/") ───────────────
+  const firstWord = text.trim().split(/\s+/)[0]?.toLowerCase() ?? '';
+  const handled = await handleTextShortcut(ctx, firstWord, text.trim());
+  if (handled) return;
+
+  // ── 3. TRANSACTION PARSER ────────────────────────────
   const parsed = parseTextInput(text);
 
-  // Bukan format transaksi yang dikenali
   if (!parsed) {
     await ctx.reply(MSG_UNKNOWN_INPUT, { parse_mode: 'Markdown' });
     return;
   }
-
-  const userId = ctx.from.id;
 
   try {
     if (parsed.type === 'expense') {
@@ -160,9 +150,247 @@ export async function handleTextInput(ctx: Context): Promise<void> {
       return;
     }
 
-    // Error lainnya
     const message = err instanceof Error ? err.message : 'Terjadi kesalahan.';
     await ctx.reply(`❌ ${message}`);
+  }
+}
+
+// ─────────────────────────────────────────────────────────
+// TEXT SHORTCUT HANDLER
+// Ketik "menu", "saldo", "laporan", dll tanpa "/"
+// Return true jika handled
+// ─────────────────────────────────────────────────────────
+
+async function handleTextShortcut(ctx: Context, firstWord: string, fullText: string): Promise<boolean> {
+  if (!ctx.from) return false;
+  const userId = ctx.from.id;
+
+  switch (firstWord) {
+    case 'home':
+    case 'dashboard': {
+      const dashboard = await buildDashboard(userId);
+      const dashKb = new InlineKeyboard()
+        .text('📊 Laporan', 'menu:laporan')
+        .text('📈 Chart', 'menu:chart')
+        .row()
+        .text('💼 Dompet', 'menu:saldo')
+        .text('📤 Export', 'menu:export')
+        .row()
+        .text('📂 Menu', 'menu:full_menu');
+      await ctx.reply(dashboard, { parse_mode: 'Markdown', reply_markup: dashKb });
+      return true;
+    }
+    case 'menu': {
+      await ctx.reply('╔══ *MENU UTAMA* ══╗\nPilih fitur:', {
+        parse_mode: 'Markdown',
+        reply_markup: mainMenuKeyboard(),
+      });
+      return true;
+    }
+    case 'saldo': {
+      const wallets = await getAllWallets(userId);
+      await ctx.reply(buildSaldoMessage(wallets));
+      return true;
+    }
+    case 'help':
+    case 'bantuan': {
+      await ctx.reply(
+        '📖 Ketik /help untuk daftar lengkap perintah.\n\nAtau coba langsung:\n• `keluar makan 30rb cash`\n• `masuk gaji 3jt bca`\n• `saldo`\n• `menu`',
+        { parse_mode: 'Markdown' }
+      );
+      return true;
+    }
+    case 'laporan': {
+      const args = fullText.split(/\s+/);
+      const periodArg = args[1]?.toLowerCase() ?? '';
+      let period: 'hari' | 'minggu' | 'bulan' = 'bulan';
+      if (periodArg === 'hari' || periodArg === 'today') period = 'hari';
+      else if (periodArg === 'minggu' || periodArg === 'week') period = 'minggu';
+
+      const report = await generateReport(userId, period);
+      const lines = [
+        `📊 LAPORAN ${report.period}`,
+        SEP,
+        `💚 Pemasukan      ${formatCurrency(report.totalIncome)}`,
+        `❤️ Pengeluaran    ${formatCurrency(report.totalExpense)}`,
+        `─────────────────────`,
+        `💰 Selisih       ${report.balance >= 0 ? '+' : ''}${formatCurrency(report.balance)}`,
+      ];
+      if (report.expenseByCategory.length > 0) {
+        lines.push('', '─── PENGELUARAN PER KATEGORI ───');
+        for (const c of report.expenseByCategory) {
+          lines.push(`${c.emoji} ${c.category.padEnd(14)} ${formatCurrency(c.amount)}  ${c.pct}%`);
+        }
+      }
+      const kb = new InlineKeyboard()
+        .text('📈 Chart', 'menu:chart')
+        .text('📅 Hari', 'report:hari')
+        .text('📅 Minggu', 'report:minggu')
+        .text('📅 Bulan', 'report:bulan');
+      await ctx.reply(lines.join('\n'), { reply_markup: kb });
+      return true;
+    }
+    case 'chart':
+    case 'grafik': {
+      const url = await getExpensePieChartUrl(userId);
+      if (!url) {
+        await ctx.reply('📈 Belum ada data pengeluaran bulan ini.');
+        return true;
+      }
+      await ctx.replyWithPhoto(url, {
+        caption: '📊 Pengeluaran Bulan Ini per Kategori',
+      });
+      return true;
+    }
+    case 'budget': {
+      const statuses = await getBudgetStatus(userId);
+      if (statuses.length === 0) {
+        await ctx.reply('📋 Belum ada budget.\nGunakan: /budget set <kategori> <nominal>');
+        return true;
+      }
+      const lines = [`📋 BUDGET STATUS`, SEP];
+      for (const s of statuses) {
+        const bar = formatProgressBar(s.spent, s.budget);
+        const warn = s.pct >= 100 ? '  🚨' : s.pct >= 80 ? '  ⚠️' : '';
+        lines.push(`${s.emoji} ${s.category}  ${bar}  ${s.pct}%${warn}`);
+      }
+      await ctx.reply(lines.join('\n'));
+      return true;
+    }
+    case 'dompet': {
+      await ctx.reply('💼 Kelola dompet: /dompet\nTambah: /dompet tambah <nama> <saldo>\nEdit: /dompet edit <nama> saldo <nominal>');
+      return true;
+    }
+    case 'kategori': {
+      await ctx.reply('📂 Kelola kategori: /kategori\nTambah: /kategori tambah <nama> <expense|income>');
+      return true;
+    }
+    case 'goals':
+    case 'goal': {
+      await ctx.reply('🎯 Goals: /goals\nTambah: /goals tambah <nama> <target>\nSetor: /goals setor <nama> <nominal>');
+      return true;
+    }
+    case 'export': {
+      const kb = new InlineKeyboard()
+        .text('📅 Bulan Ini', 'export:bulan')
+        .text('📅 3 Bulan', 'export:3bulan')
+        .text('📅 Semua', 'export:semua');
+      await ctx.reply('📤 Export data kamu?\nPilih periode:', { reply_markup: kb });
+      return true;
+    }
+    case 'batal': {
+      await ctx.reply('Gunakan: /batal untuk hapus transaksi terakhir.');
+      return true;
+    }
+    case 'reminder': {
+      await ctx.reply('⏰ Reminder: /reminder\nSet jam: /reminder set 21:00');
+      return true;
+    }
+    case 'reset': {
+      const kb = new InlineKeyboard()
+        .text('🗑️ YA, RESET SEMUA', 'reset:confirm')
+        .text('❌ Batal', 'cancel_action');
+      await ctx.reply(
+        `⚠️ *RESET SEMUA DATA*\n${SEP}\n\nSemua data berikut akan DIHAPUS PERMANEN:\n• 💼 Semua dompet & saldo\n• 📂 Semua kategori\n• 📝 Semua transaksi\n• 🎯 Semua goals\n• ⏰ Pengaturan reminder\n\n❗ Aksi ini TIDAK BISA di-undo.\n\nYakin mau reset?`,
+        { parse_mode: 'Markdown', reply_markup: kb }
+      );
+      return true;
+    }
+    default:
+      return false;
+  }
+}
+
+// ─────────────────────────────────────────────────────────
+// AWAITING INPUT HANDLER
+// Handle user text response from inline keyboard prompts
+// ─────────────────────────────────────────────────────────
+
+async function handleAwaitingInput(
+  ctx: Context,
+  action: string,
+  data: Record<string, string>,
+  input: string
+): Promise<void> {
+  if (!ctx.from) return;
+  const userId = ctx.from.id;
+
+  switch (action) {
+    case 'tambah_dompet': {
+      const parts = input.split(/\s+/);
+      const name = parts[0];
+      if (!name) { await ctx.reply('❌ Ketik nama dompet.'); return; }
+      const balance = parseAmount(parts[1] ?? '0') ?? 0;
+      const wallet = await createWallet(userId, name, balance);
+      await ctx.reply(`✅ Dompet Ditambahkan!\n${SEP}\n${wallet.emoji} ${wallet.name}\n💰 Saldo awal: ${formatCurrency(wallet.balance)}`);
+      return;
+    }
+    case 'edit_saldo_dompet': {
+      const amount = parseAmount(input);
+      if (amount === null) { await ctx.reply('❌ Nominal tidak valid.'); return; }
+      const updated = await updateWalletBalance(data.walletId, amount);
+      await ctx.reply(`✅ Saldo ${updated.emoji} ${updated.name} diperbarui: ${formatCurrency(updated.balance)}`);
+      return;
+    }
+    case 'edit_nama_dompet': {
+      const updated = await renameWallet(data.walletId, input);
+      await ctx.reply(`✅ Dompet renamed: ${updated.emoji} ${updated.name}`);
+      return;
+    }
+    case 'tambah_kategori': {
+      const name = input.toLowerCase().trim();
+      if (!name) { await ctx.reply('❌ Ketik nama kategori.'); return; }
+      const cat = await createCategory(userId, name, data.type as 'expense' | 'income');
+      await ctx.reply(`✅ Kategori Ditambahkan!\n${cat.emoji} ${cat.name}  •  ${cat.type}`);
+      return;
+    }
+    case 'edit_nama_kategori': {
+      await updateCategory(data.catId, { name: input.toLowerCase().trim() });
+      await ctx.reply(`✅ Kategori di-rename jadi: ${input.toLowerCase().trim()}`);
+      return;
+    }
+    case 'edit_emoji_kategori': {
+      await updateCategory(data.catId, { emoji: input.trim() });
+      await ctx.reply(`✅ Emoji diperbarui: ${input.trim()}`);
+      return;
+    }
+    case 'tambah_goal': {
+      const parts = input.split(/\s+/);
+      const name = parts[0];
+      const targetStr = parts[1];
+      if (!name || !targetStr) { await ctx.reply('❌ Gunakan format: <nama> <target>\nContoh: laptop 5jt'); return; }
+      const target = parseAmount(targetStr);
+      if (!target) { await ctx.reply('❌ Nominal target tidak valid.'); return; }
+      const goal = await createGoal(userId, name, target);
+      await ctx.reply(`✅ Goal Ditambahkan!\n${goal.emoji} ${goal.name}\n🎯 Target: ${formatCurrency(goal.target_amount)}`);
+      return;
+    }
+    case 'setor_goal': {
+      const amount = parseAmount(input);
+      if (!amount) { await ctx.reply('❌ Nominal tidak valid.'); return; }
+      const updated = await addDeposit(data.goalId, amount);
+      const pct = Math.round((updated.current_amount / updated.target_amount) * 100);
+      const remaining = updated.target_amount - updated.current_amount;
+      await ctx.reply(
+        `✅ Setoran Berhasil!\n${SEP}\n${updated.emoji} ${updated.name}\n${formatProgressBar(updated.current_amount, updated.target_amount)}  ${pct}%\n${formatCurrency(updated.current_amount)} / ${formatCurrency(updated.target_amount)}\n\n${remaining > 0 ? `Tinggal ${formatCurrency(remaining)} lagi 💪` : '🎉 Goal tercapai!'}`
+      );
+      return;
+    }
+    case 'set_reminder': {
+      if (!input.includes(':')) { await ctx.reply('❌ Format: HH:MM (contoh: 21:00)'); return; }
+      const [hStr, mStr] = input.split(':');
+      const h = parseInt(hStr ?? '0', 10);
+      const m = parseInt(mStr ?? '0', 10);
+      if (isNaN(h) || isNaN(m) || h < 0 || h > 23 || m < 0 || m > 59) {
+        await ctx.reply('❌ Format jam tidak valid.');
+        return;
+      }
+      await upsertReminder(userId, h, m);
+      await ctx.reply(`✅ Reminder diatur ke ${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')} WIB setiap hari.`);
+      return;
+    }
+    default:
+      await ctx.reply('Sesi input sudah expire. Coba lagi dari menu.');
   }
 }
 

@@ -6,7 +6,10 @@
   "scripts": {
     "dev": "nodemon --watch src --ext ts --exec ts-node src/bot.ts",
     "build": "tsc",
-    "start": "node dist/bot.js",
+    "build:vercel": "tsc --rootDir . --outDir dist",
+    "start": "node dist/src/bot.js",
+    "webhook:set": "ts-node scripts/set-webhook.ts",
+    "webhook:delete": "ts-node scripts/delete-webhook.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "eslint src --ext .ts",

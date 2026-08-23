@@ -1,4 +1,4 @@
-# Setup Guide — BisaHemat Bot
+﻿# Setup Guide — BisaHemat Bot
 
 Dokumen ini berisi langkah-langkah setup Telegram (BotFather) dan Supabase
 sebelum mulai coding. Ikuti urutan ini.
@@ -52,6 +52,7 @@ Masih di chat @BotFather:
 
 start - Setup awal & onboarding
 help - Daftar semua command
+home - Dashboard ringkasan lengkap
 menu - Quick menu dengan tombol
 saldo - Lihat saldo semua dompet
 laporan - Laporan keuangan harian/mingguan/bulanan
@@ -65,6 +66,7 @@ budget - Atur & lihat budget bulanan
 goals - Savings goals & progress
 reminder - Atur pengingat harian
 export - Download data sebagai CSV
+reset - Reset semua data
 ```
 
 ---
@@ -180,7 +182,6 @@ TIMEZONE=Asia/Jakarta
 - [ ] SQL migration sudah dijalankan (5 tabel muncul)
 - [ ] `SUPABASE_URL` + `SUPABASE_ANON_KEY` sudah disalin
 - [ ] File `.env` sudah diisi semua
-- [ ] **Bilang ke Antigravity → siap coding Phase 1! 🚀**
 
 ---
 
@@ -200,7 +201,7 @@ TIMEZONE=Asia/Jakarta
 
 ---
 
-## BAGIAN 4 — DEPLOY KE RAILWAY
+## BAGIAN 4 — DEPLOY BOT (GRATIS)
 
 ### Persiapan: Push ke GitHub
 
@@ -225,157 +226,197 @@ git push -u origin main
 
 ---
 
-### Step 1 — Buat Akun Railway
+## DEPLOY KE VERCEL (Gratis, Webhook Mode)
 
-1. Buka **[railway.app](https://railway.app)**
-2. Klik **"Login"** → pilih **"Login with GitHub"**
-3. Authorize Railway untuk akses GitHub lu
+**Kenapa Vercel:**
+- ✅ **100% Gratis** — Hobby plan, no credit card
+- ✅ Auto-deploy dari GitHub
+- ✅ Serverless — tidak perlu server selalu nyala
+- ✅ Setup mudah
 
----
+> ⚠️ Bot akan berubah dari **polling** (lokal) ke **webhook** (Vercel).
+> Di webhook mode, Telegram yang kirim update ke bot (bukan bot yang polling).
+> Cron jobs (reminder) tidak jalan di Vercel karena serverless.
 
-### Step 2 — Buat Project Baru
+### Step 1 — Buat Akun Vercel
 
-1. Di dashboard Railway, klik **"New Project"**
-2. Pilih **"Deploy from GitHub repo"**
-3. Pilih repo **bisahemat-bot** yang tadi dibuat
-4. Railway akan otomatis detect project dan mulai build
+1. Buka **[vercel.com](https://vercel.com)**
+2. Klik **"Sign Up"** → pilih **"Continue with GitHub"**
+3. Authorize Vercel
 
----
+### Step 2 — Push Code ke GitHub
 
-### Step 3 — Set Environment Variables
+```bash
+git init
+git add .
+git commit -m "feat: BisaHemat bot complete"
+git branch -M main
+git remote add origin https://github.com/USERNAME_LU/bisahemat-bot.git
+git push -u origin main
+```
 
-Ini PENTING — Railway tidak pakai file `.env`, tapi env vars di dashboard.
+> ⚠️ Pastikan `.env` sudah masuk `.gitignore`.
 
-1. Klik project yang baru dibuat
-2. Klik service (biasanya langsung muncul)
-3. Pergi ke tab **"Variables"**
-4. Klik **"New Variable"** dan tambahkan satu per satu:
+### Step 3 — Import Project di Vercel
+
+1. Di dashboard Vercel, klik **"Add New..."** → **"Project"**
+2. Pilih repo **bisahemat-bot** dari GitHub
+3. Konfigurasi:
+
+| Setting | Value |
+|---------|-------|
+| Framework Preset | **Other** |
+| Root Directory | `.` (default) |
+| Build Command | `npm run build:vercel` |
+| Output Directory | (kosongkan) |
+
+4. Klik **"Deploy"** → tunggu build selesai
+
+### Step 4 — Set Environment Variables
+
+1. Di project Vercel, klik **"Settings"** → **"Environment Variables"**
+2. Tambahkan variabel berikut:
 
 | Key | Value |
 |-----|-------|
 | `BOT_TOKEN` | Token dari BotFather |
-| `MY_TELEGRAM_ID` | Telegram ID lu |
+| `MY_TELEGRAM_ID` | Telegram ID lu (angka) |
 | `SUPABASE_URL` | `https://xxxx.supabase.co` |
 | `SUPABASE_ANON_KEY` | Anon key dari Supabase |
 | `NODE_ENV` | `production` |
 | `TIMEZONE` | `Asia/Jakarta` |
 
-> 💡 Tips: Klik **"RAW Editor"** untuk paste semuanya sekaligus dalam format:
-> ```
-> BOT_TOKEN=1234567890:ABCdef...
-> MY_TELEGRAM_ID=123456789
-> SUPABASE_URL=https://xxxx.supabase.co
-> SUPABASE_ANON_KEY=eyJhbGci...
-> NODE_ENV=production
-> TIMEZONE=Asia/Jakarta
-> ```
+3. Klik **"Save"**
+4. Lalu **redeploy** (Deployments → klik 3 titik → Redeploy)
 
----
+### Step 5 — Set Webhook Telegram
 
-### Step 4 — Konfigurasi Build & Start
+Setelah deploy berhasil, catat URL Vercel lu (contoh: `bisahemat-bot.vercel.app`).
 
-Railway biasanya auto-detect dari `package.json`, tapi untuk memastikan:
+**Opsi A — Via browser (paling gampang):**
 
-1. Klik tab **"Settings"** pada service
-2. Pastikan:
-   - **Build Command:** `npm run build`
-   - **Start Command:** `npm start`
-   - **Watch Path:** `/`
-
-Kalau Railway tidak auto-detect, tambahkan file `Procfile` di root project:
-
+Buka URL ini di browser (ganti `TOKEN` dan `URL`):
 ```
-web: npm start
+https://api.telegram.org/botTOKEN_LU_DISINI/setWebhook?url=https://nama-project.vercel.app/api/webhook
 ```
 
-Atau bisa juga pakai `railway.json`:
+Contoh:
+```
+https://api.telegram.org/bot1234567890:ABCdef/setWebhook?url=https://bisahemat-bot.vercel.app/api/webhook
+```
 
+Kalau berhasil, browser akan tampilkan:
 ```json
-{
-  "$schema": "https://railway.com/railway.schema.json",
-  "build": {
-    "builder": "NIXPACKS"
-  },
-  "deploy": {
-    "startCommand": "npm start",
-    "restartPolicyType": "ON_FAILURE",
-    "restartPolicyMaxRetries": 10
-  }
-}
+{"ok":true,"result":true,"description":"Webhook was set"}
 ```
 
----
-
-### Step 5 — Deploy & Verifikasi
-
-1. Setelah variables diisi, Railway akan **auto-deploy**
-2. Lihat tab **"Deployments"** → tunggu status **"Active"** (hijau ✅)
-3. Buka tab **"Logs"** → cari output:
-   ```
-   🤖 BisaHemat Bot starting...
-   📡 Mode: production
-   🔁 Cron jobs started
-   ✅ Bot @BisaHematBot is running!
-   ```
-4. Buka Telegram → chat ke bot → test `/start`
-
----
-
-### Step 6 — Auto-Deploy (Otomatis)
-
-Setiap kali lu push ke branch `main` di GitHub, Railway akan **otomatis redeploy**.
-
+**Opsi B — Via script (dari terminal lokal):**
 ```bash
-# Edit code...
+# Set VERCEL_PROJECT_URL dulu
+set VERCEL_PROJECT_URL=bisahemat-bot.vercel.app
+npm run webhook:set
+```
+
+### Step 6 — Verifikasi
+
+1. Buka Telegram → chat ke bot
+2. Ketik `/start` → bot harus merespons
+3. Coba: `keluar makan 30rb cash` → transaksi harus tercatat
+4. Ketik `home` → dashboard harus muncul
+
+### Step 7 — Auto-Deploy
+
+Setiap push ke `main`, Vercel otomatis redeploy:
+```bash
 git add .
 git commit -m "fix: update something"
 git push
-# Railway auto-redeploy ✅
+# Vercel auto-redeploy ✅ (webhook URL tetap sama)
 ```
 
 ---
 
-### Step 7 — Stop Local Bot
+## WORKFLOW: DEV LOKAL ↔ VERCEL
 
-Setelah deploy di Railway berhasil, **matikan bot lokal** di VS Code:
+### Mau dev lokal (polling mode):
+```bash
+# 1. Hapus webhook dulu
+npm run webhook:delete
+# atau buka di browser:
+# https://api.telegram.org/botTOKEN/deleteWebhook
 
-- Di terminal yang menjalankan `npm run dev`, tekan `Ctrl + C`
-- Kalau lokal dan Railway jalan bersamaan, bot akan error (conflict polling)
+# 2. Jalankan bot lokal
+npm run dev
+```
 
-> ⚠️ Hanya SATU instance bot yang boleh jalan — lokal ATAU Railway, tidak keduanya.
+### Selesai dev, balik ke Vercel (webhook mode):
+```bash
+# 1. Matikan bot lokal (Ctrl+C)
+# 2. Push code
+git add . && git commit -m "update" && git push
+
+# 3. Set webhook lagi
+npm run webhook:set
+# atau via browser (lihat Step 5)
+```
+
+> ⚠️ PENTING: Jangan jalankan bot lokal saat webhook aktif — conflict!
 
 ---
 
-## RAILWAY TROUBLESHOOTING
+## CATATAN VERCEL
 
-**Build failed: "tsc: not found"**
-→ Pastikan `typescript` ada di `devDependencies` (sudah ada di project ini).
+**Kelebihan:**
+- Gratis total, no credit card
+- Auto-deploy, no downtime
+- Cocok untuk bot dengan traffic normal
 
-**Bot crash loop di Railway**
-→ Cek Logs tab. Biasanya env variable yang kurang/salah.
+**Limitasi:**
+- ❌ Cron jobs/reminder harian **tidak jalan** (serverless = no background process)
+- ❌ Response timeout max 30 detik
+- Kalau butuh reminder, bisa pakai Vercel Cron (butuh vercel.json config tambahan)
+
+**Alternatif berbayar jika butuh always-on + cron:**
+
+| Platform | Harga |
+|----------|-------|
+| Render Background Worker | $7/bulan |
+| Fly.io | Gratis (perlu kartu) |
+| DigitalOcean | $4/bulan |
+
+---
+
+## DEPLOYMENT TROUBLESHOOTING
+
+**Build failed**
+→ Jalankan `npm run build:vercel` di lokal dulu untuk cek error.
 
 **Bot tidak merespons setelah deploy**
-→ Pastikan bot lokal sudah dimatikan (Ctrl+C). Dua instance = conflict.
+→ Pastikan webhook sudah di-set (Step 5). Cek di browser:
+`https://api.telegram.org/botTOKEN/getWebhookInfo`
 
-**Deploy berhasil tapi "MISSING BOT_TOKEN"**
-→ Cek Variables tab — pastikan `BOT_TOKEN` terisi (bukan placeholder).
+**"MISSING BOT_TOKEN" di Vercel**
+→ Cek Settings → Environment Variables. Pastikan terisi. Lalu Redeploy.
 
-**Railway free tier sleep / hibernation**
-→ Keep-alive cron sudah built-in (ping tiap 14 menit). Tapi free tier Railway
-memiliki batas jam per bulan (~500 hours). Untuk always-on, perlu upgrade ke
-Hobby plan ($5/month).
+**Webhook error 400**
+→ Pastikan URL webhook benar: `https://nama.vercel.app/api/webhook`
+
+**Bot jalan lokal tapi tidak di Vercel**
+→ Pastikan webhook sudah set. Dan bot lokal sudah dimatikan.
 
 ---
 
 ## CHECKLIST DEPLOYMENT
 
-- [ ] Code sudah di-push ke GitHub
-- [ ] Railway project dibuat, linked ke repo
-- [ ] 6 environment variables sudah diisi di Railway
-- [ ] Build command = `npm run build`
-- [ ] Start command = `npm start`
-- [ ] Deployment status = Active ✅
-- [ ] Logs menunjukkan bot running
+- [ ] Code di-push ke GitHub (private repo)
+- [ ] Akun Vercel dibuat (sign up via GitHub)
+- [ ] Project imported di Vercel
+- [ ] Build command = `npm run build:vercel`
+- [ ] 6 environment variables diisi di Vercel
+- [ ] Deploy berhasil (hijau ✅)
+- [ ] Webhook sudah di-set via browser/script
 - [ ] Test `/start` di Telegram → bot merespons
-- [ ] Bot lokal sudah dimatikan (Ctrl+C)
-- [ ] ✅ **BisaHemat sudah live di cloud!** 🎉
+- [ ] Test `keluar makan 30rb cash` → transaksi tercatat
+- [ ] Bot lokal sudah dimatikan
+- [ ] ✅ **BisaHemat sudah live di Vercel!** 🎉
+

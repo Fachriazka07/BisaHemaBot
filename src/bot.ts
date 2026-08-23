@@ -1,4 +1,4 @@
-import { Bot } from 'grammy';
+import { Bot, InlineKeyboard } from 'grammy';
 import { config } from './config';
 import { ensureUserInitialized } from './services/user.service';
 import { handleTextInput } from './handlers/text.handler';
@@ -7,6 +7,7 @@ import { registerCallbacks } from './handlers/callback.handler';
 import { startCronJobs } from './cron/jobs';
 import { buildWelcomeMessage } from './utils/formatter';
 import { mainMenuKeyboard } from './utils/keyboard';
+import { buildDashboard } from './services/dashboard.service';
 
 // ──────────────────────────────────────────────
 // Initialize bot
@@ -61,6 +62,9 @@ bot.command('help', async (ctx) => {
     '`masuk <sumber> <nominal> <dompet>`',
     '`transfer <nominal> dari <A> ke <B>`',
     '',
+    '─── *DASHBOARD* ─────────────────',
+    '/home — Ringkasan lengkap (dashboard)',
+    '',
     '─── *LAPORAN* ───────────────────',
     '/saldo — Saldo semua dompet',
     '/laporan — Laporan hari/minggu/bulan',
@@ -85,10 +89,39 @@ bot.command('help', async (ctx) => {
     '/batal — Hapus transaksi terakhir',
     '/edit — Edit transaksi',
     '/reminder — Atur reminder harian',
+    '/reset — Reset semua data',
     '/menu — Menu dengan tombol',
+    '',
+    '💡 _Ketik tanpa /: home, saldo, menu, laporan, chart, budget, export, reset_',
   ].join('\n');
 
   await ctx.reply(helpText, { parse_mode: 'Markdown' });
+});
+
+bot.command('home', async (ctx) => {
+  if (!ctx.from) return;
+  const dashboard = await buildDashboard(ctx.from.id);
+  const kb = new InlineKeyboard()
+    .text('📊 Laporan', 'menu:laporan')
+    .text('📈 Chart', 'menu:chart')
+    .row()
+    .text('💼 Dompet', 'menu:saldo')
+    .text('📤 Export', 'menu:export')
+    .row()
+    .text('📂 Menu', 'menu:full_menu');
+  await ctx.reply(dashboard, { parse_mode: 'Markdown', reply_markup: kb });
+});
+
+bot.command('dashboard', async (ctx) => {
+  if (!ctx.from) return;
+  const dashboard = await buildDashboard(ctx.from.id);
+  const kb = new InlineKeyboard()
+    .text('📊 Laporan', 'menu:laporan')
+    .text('📈 Chart', 'menu:chart')
+    .row()
+    .text('💼 Dompet', 'menu:saldo')
+    .text('📤 Export', 'menu:export');
+  await ctx.reply(dashboard, { parse_mode: 'Markdown', reply_markup: kb });
 });
 
 bot.command('menu', async (ctx) => {
@@ -96,6 +129,19 @@ bot.command('menu', async (ctx) => {
     parse_mode: 'Markdown',
     reply_markup: mainMenuKeyboard(),
   });
+});
+
+bot.command('reset', async (ctx) => {
+  const { InlineKeyboard } = await import('grammy');
+  const kb = new InlineKeyboard()
+    .text('🗑️ YA, RESET SEMUA', 'reset:confirm')
+    .text('❌ Batal', 'cancel_action');
+
+  const SEP = '━━━━━━━━━━━━━━━━━━━━';
+  await ctx.reply(
+    `⚠️ *RESET SEMUA DATA*\n${SEP}\n\nSemua data berikut akan DIHAPUS PERMANEN:\n• 💼 Semua dompet & saldo\n• 📂 Semua kategori\n• 📝 Semua transaksi\n• 🎯 Semua goals\n• ⏰ Pengaturan reminder\n\n❗ Aksi ini TIDAK BISA di-undo.\n\nYakin mau reset?`,
+    { parse_mode: 'Markdown', reply_markup: kb }
+  );
 });
 
 // ──────────────────────────────────────────────
@@ -123,22 +169,31 @@ bot.catch((err) => {
 // ──────────────────────────────────────────────
 // START
 // ──────────────────────────────────────────────
-async function main(): Promise<void> {
-  console.info('🤖 BisaHemat Bot starting...');
-  console.info(`📡 Mode: ${config.app.nodeEnv}`);
 
-  // Start cron jobs
-  startCronJobs(bot);
+// Export bot for webhook usage (Vercel)
+export { bot };
 
-  await bot.start({
-    onStart: (info) => {
-      console.info(`✅ Bot @${info.username} is running!`);
-      console.info(`👤 My Telegram ID: ${config.bot.myTelegramId}`);
-    },
+// Only start polling in non-Vercel environments
+const isVercel = process.env.VERCEL === '1' || process.env.VERCEL_ENV !== undefined;
+
+if (!isVercel) {
+  async function main(): Promise<void> {
+    console.info('🤖 BisaHemat Bot starting...');
+    console.info(`📡 Mode: ${config.app.nodeEnv} (polling)`);
+
+    // Start cron jobs (only for polling mode)
+    startCronJobs(bot);
+
+    await bot.start({
+      onStart: (info) => {
+        console.info(`✅ Bot @${info.username} is running!`);
+        console.info(`👤 My Telegram ID: ${config.bot.myTelegramId}`);
+      },
+    });
+  }
+
+  main().catch((err: unknown) => {
+    console.error('Fatal error:', err);
+    process.exit(1);
   });
 }
-
-main().catch((err: unknown) => {
-  console.error('Fatal error:', err);
-  process.exit(1);
-});
