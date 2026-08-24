@@ -80,7 +80,12 @@ export async function getAllCategories(userId: number): Promise<Category[]> {
     .order('name', { ascending: true });
 
   if (error) throw new Error(`getAllCategories: ${error.message}`);
-  return (data ?? []) as Category[];
+
+  if (!data || data.length === 0) {
+    return await createDefaultCategories(userId);
+  }
+
+  return data as Category[];
 }
 
 /**

@@ -22,7 +22,12 @@ export async function getAllWallets(userId: number): Promise<Wallet[]> {
     .order('created_at', { ascending: true });
 
   if (error) throw new Error(`getAllWallets: ${error.message}`);
-  return (data ?? []) as Wallet[];
+
+  if (!data || data.length === 0) {
+    return await createDefaultWallets(userId);
+  }
+
+  return data as Wallet[];
 }
 
 /**

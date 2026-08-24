@@ -72,7 +72,7 @@ export function formatDate(isoString: string): string {
 }
 
 // ─────────────────────────────────────────────────────────
-// MESSAGE BUILDERS
+// MESSAGE BUILDERS (SaaS AI Copywriting Style)
 // ─────────────────────────────────────────────────────────
 
 const SEP = '━━━━━━━━━━━━━━━━━━━━';
@@ -87,24 +87,26 @@ export function buildTransactionConfirm(opts: {
   description?: string;
   createdAt: string;
 }): string {
-  const emoji = opts.type === 'expense' ? '❤️' : '💚';
+  const isExpense = opts.type === 'expense';
+  const tag = isExpense ? '💸 Pengeluaran' : '💚 Pemasukan';
   const catDisplay = opts.category
     ? `${opts.category.emoji} ${opts.category.name}`
-    : '📦 Lainnya';
+    : '📦 Umum';
 
   const lines = [
-    `✅ Dicatat!`,
+    `⚡ *Transaksi Berhasil Dicatat!*`,
     SEP,
-    `${catDisplay}`,
-    `${emoji} ${formatCurrency(opts.amount)}`,
-    `${opts.wallet.emoji} ${opts.wallet.name}  →  sisa ${formatCurrency(opts.wallet.balance)}`,
+    `🏷️ *Kategori* : ${catDisplay}`,
+    `📊 *Tipe*     : ${tag}`,
+    `💰 *Nominal*  : *${formatCurrency(opts.amount)}*`,
+    `💳 *Dompet*   : ${opts.wallet.emoji} ${opts.wallet.name} (Sisa: ${formatCurrency(opts.wallet.balance)})`,
   ];
 
   if (opts.description) {
-    lines.push(`📝 ${opts.description}`);
+    lines.push(`📝 *Catatan*  : ${opts.description}`);
   }
 
-  lines.push(`🕐 ${formatDateTime(opts.createdAt)}`);
+  lines.push(`🕐 *Waktu*    : ${formatDateTime(opts.createdAt)}`);
 
   return lines.join('\n');
 }
@@ -116,61 +118,53 @@ export function buildTransferConfirm(opts: {
   toWallet: Wallet;
 }): string {
   return [
-    `✅ Transfer Berhasil!`,
+    `⚡ *Transfer Berhasil!*`,
     SEP,
-    `💳 ${opts.fromWallet.emoji} ${opts.fromWallet.name}  →  ${opts.toWallet.emoji} ${opts.toWallet.name}`,
-    `💰 ${formatCurrency(opts.amount)}`,
-    SEP_THIN,
-    `${opts.fromWallet.emoji} ${opts.fromWallet.name}  sisa  ${formatCurrency(opts.fromWallet.balance)}`,
-    `${opts.toWallet.emoji} ${opts.toWallet.name}  total  ${formatCurrency(opts.toWallet.balance)}`,
+    `💸 *Dari*    : ${opts.fromWallet.emoji} ${opts.fromWallet.name} (Sisa: ${formatCurrency(opts.fromWallet.balance)})`,
+    `📥 *Ke*      : ${opts.toWallet.emoji} ${opts.toWallet.name} (Total: ${formatCurrency(opts.toWallet.balance)})`,
+    `💰 *Jumlah*  : *${formatCurrency(opts.amount)}*`,
   ].join('\n');
 }
 
 /** Tampilkan semua saldo dompet */
 export function buildSaldoMessage(wallets: Wallet[]): string {
   if (wallets.length === 0) {
-    return '💼 Belum ada dompet.\n\nTambah dompet dengan:\n/dompet tambah <nama> <saldo>';
+    return '💼 *Belum ada dompet terdaftar.*\n\nTambah dompet baru:\n`/dompet tambah <nama> <saldo>`';
   }
 
   const total = wallets.reduce((sum, w) => sum + w.balance, 0);
 
   const rows = wallets.map((w) => {
-    const name = `${w.emoji} ${w.name}`.padEnd(18);
-    return `${name}${formatCurrency(w.balance)}`;
+    return `${w.emoji} *${w.name.padEnd(12)}* : ${formatCurrency(w.balance)}`;
   });
 
   return [
-    `💼 SALDO DOMPET`,
+    `💼 *FINANCIAL ASSET SUMMARY*`,
     SEP,
     ...rows,
     SEP,
-    `💰 Total          ${formatCurrency(total)}`,
+    `💰 *Total Aset Netto* : *${formatCurrency(total)}*`,
   ].join('\n');
 }
 
-/** Pesan welcome untuk user baru */
+/** Pesan welcome untuk user baru — AI SaaS style */
 export function buildWelcomeMessage(wallets: Wallet[]): string {
-  const walletList = wallets.map((w) => `  ${w.emoji} ${w.name}  •  ${formatCurrency(w.balance)}`).join('\n');
+  const walletList = wallets.map((w) => `  ${w.emoji} *${w.name}* : ${formatCurrency(w.balance)}`).join('\n');
 
   return [
-    `Halo! 👋 Selamat datang di *BisaHemat*.`,
+    `✨ *Selamat Datang di BisaHemat AI!*`,
+    `Asisten Keuangan Pribadi Berbasis AI 🚀`,
+    SEP,
     ``,
-    `Aku sudah siapkan dompet & kategori awal:`,
-    SEP_THIN,
+    `📂 *Akun & Dompet Default:*`,
     walletList,
-    SEP_THIN,
     ``,
-    `*Cara pakai cepat:*`,
-    `Catat pengeluaran:`,
-    `  \`keluar makan 30rb cash\``,
+    `⚡ *Quick Command Guide:*`,
+    `• Catat Pengeluaran : \`keluar makan 30rb cash\``,
+    `• Catat Pemasukan   : \`masuk gaji 5jt bca\``,
+    `• Transfer Dompet   : \`transfer 50rb dari bca ke cash\``,
     ``,
-    `Catat pemasukan:`,
-    `  \`masuk gaji 3jt bca\``,
-    ``,
-    `Transfer antar dompet:`,
-    `  \`transfer 50rb dari bca ke cash\``,
-    ``,
-    `Ketik /help untuk semua perintah.`,
+    `📊 Ketik *home* atau */menu* untuk membuka Dashboard Interaktif.`,
   ].join('\n');
 }
 
@@ -188,25 +182,26 @@ export function buildWalletNotFoundMessage(name: string, wallets: Wallet[]): str
 
 /** Pesan error: nominal tidak valid */
 export const MSG_INVALID_AMOUNT = [
-  `❌ Nominal tidak dikenali.`,
+  `⚠️ *Format Nominal Tidak Valid*`,
+  SEP_THIN,
+  `Gunakan format angka standar AI:`,
+  `• \`30rb\` atau \`30k\`  (Rp 30.000)`,
+  `• \`1.5jt\` atau \`1500000\`  (Rp 1.500.000)`,
   ``,
-  `Gunakan format angka:`,
-  `• \`30rb\`  • \`30k\`  • \`30.000\``,
-  `• \`1.5jt\`  • \`1500000\``,
-  ``,
-  `Contoh: \`keluar makan 30rb cash\``,
+  `💡 *Contoh:* \`keluar makan 35rb cash\``,
 ].join('\n');
 
 /** Pesan untuk input tidak dikenali */
 export const MSG_UNKNOWN_INPUT = [
-  `Hmm, aku tidak mengerti itu. 🤔`,
+  `🤖 *AI Assistant Notification*`,
+  SEP_THIN,
+  `Pesan tidak dikenali. Gunakan format cepat berikut:`,
   ``,
-  `Coba format ini:`,
-  `• \`keluar makan 30rb cash\``,
-  `• \`masuk gaji 3jt bca\``,
-  `• \`transfer 50rb dari bca ke cash\``,
+  `• *Pengeluaran* : \`keluar makan 30rb cash\``,
+  `• *Pemasukan*   : \`masuk gaji 3jt bca\``,
+  `• *Transfer*    : \`transfer 50rb dari bca ke cash\``,
   ``,
-  `Atau ketik /menu untuk semua fitur.`,
+  `💡 Ketik *home* atau */menu* untuk membuka Dashboard Utama.`,
 ].join('\n');
 
 /** Format ID transaksi singkat (8 karakter pertama) */
@@ -219,17 +214,18 @@ export function buildCancelConfirmMessage(tx: Transaction & {
   wallet: Wallet;
   category: Category | null;
 }): string {
-  const catDisplay = tx.category ? `${tx.category.emoji} ${tx.category.name}` : '📦 Lainnya';
+  const catDisplay = tx.category ? `${tx.category.emoji} ${tx.category.name}` : '📦 Umum';
 
   return [
-    `🗑️ Hapus transaksi ini?`,
+    `🗑️ *Konfirmasi Pembatalan Transaksi*`,
     SEP,
-    catDisplay,
-    `${formatCurrency(tx.amount)}  •  ${tx.wallet.emoji} ${tx.wallet.name}`,
-    tx.description ? `📝 ${tx.description}` : '',
-    `🕐 ${formatDateTime(tx.created_at)}`,
-    ``,
-    `Saldo ${tx.wallet.name} akan kembali ke ${formatCurrency(tx.type === 'expense' ? tx.wallet.balance + tx.amount : tx.wallet.balance - tx.amount)}`,
+    `🏷️ *Kategori* : ${catDisplay}`,
+    `💰 *Nominal*  : ${formatCurrency(tx.amount)}`,
+    `💳 *Dompet*   : ${tx.wallet.emoji} ${tx.wallet.name}`,
+    tx.description ? `📝 *Catatan*  : ${tx.description}` : '',
+    `🕐 *Waktu*    : ${formatDateTime(tx.created_at)}`,
+    SEP_THIN,
+    `🔄 Saldo *${tx.wallet.name}* akan dikembalikan ke *${formatCurrency(tx.type === 'expense' ? tx.wallet.balance + tx.amount : tx.wallet.balance - tx.amount)}*`,
   ]
     .filter(Boolean)
     .join('\n');

@@ -9,11 +9,13 @@ import {
   getAllWallets,
   deleteWallet,
   createWallet,
+  createDefaultWallets,
 } from '../services/wallet.service';
 import {
   getAllCategories,
   deleteCategory,
   createCategory,
+  createDefaultCategories,
 } from '../services/category.service';
 import {
   deleteGoal,
@@ -725,8 +727,15 @@ export function registerCallbacks(bot: Bot): void {
         await supabase.from('categories').delete().eq('user_id', userId);
         await supabase.from('wallets').delete().eq('user_id', userId);
 
-        await safeEdit(ctx, '✅ Semua data sudah direset.\n\nKetik apapun untuk mulai dari awal — dompet & kategori default akan dibuat otomatis.');
-        await ctx.answerCallbackQuery('Data direset!');
+        // Re-create default wallets & default categories immediately
+        await createDefaultWallets(userId);
+        await createDefaultCategories(userId);
+
+        await safeEdit(
+          ctx,
+          `✨ *System Reset Complete!*\n${SEP}\nSemua data transaksi, dompet, dan goals berhasil dibersihkan.\n\n📂 *Dompet & Kategori default telah siap dipakai kembali.*\nKetik *home* atau */start* untuk melihat Dashboard.`
+        );
+        await ctx.answerCallbackQuery('Reset sukses!');
         return;
       }
 
