@@ -17,6 +17,7 @@ import {
   createWallet,
   updateWalletBalance,
   renameWallet,
+  updateWalletEmoji,
 } from '../services/wallet.service';
 import {
   getAllCategories,
@@ -235,14 +236,31 @@ export function registerCommands(bot: Bot): void {
     }
 
     if (sub === 'tambah') {
-      const name = args[1];
-      const balanceStr = args[2];
-      if (!name) {
-        await ctx.reply('Gunakan: /dompet tambah <nama> <saldo>\nContoh: /dompet tambah dana 200rb');
+      const rest = args.slice(1);
+      if (rest.length === 0) {
+        await ctx.reply('Gunakan: /dompet tambah <nama> [saldo]\nContoh: /dompet tambah 🛴 Beam 50rb\natau: /dompet tambah mandiri 1jt');
         return;
       }
-      const balance = parseAmount(balanceStr ?? '0') ?? 0;
-      const wallet = await createWallet(ctx.from.id, name, balance);
+
+      let balance = 0;
+      const nameParts: string[] = [];
+
+      for (const part of rest) {
+        const parsed = parseAmount(part);
+        if (parsed !== null && balance === 0 && (part.match(/\d/) || part.toLowerCase().includes('k') || part.toLowerCase().includes('rb') || part.toLowerCase().includes('jt'))) {
+          balance = parsed;
+        } else {
+          nameParts.push(part);
+        }
+      }
+
+      const rawName = nameParts.join(' ');
+      if (!rawName) {
+        await ctx.reply('❌ Nama dompet tidak boleh kosong.');
+        return;
+      }
+
+      const wallet = await createWallet(ctx.from.id, rawName, balance);
       await ctx.reply(`✅ Dompet Baru Ditambahkan!\n${SEP}\n${wallet.emoji} ${wallet.name}\n💰 Saldo awal   ${formatCurrency(wallet.balance)}`);
       return;
     }
@@ -275,8 +293,11 @@ export function registerCommands(bot: Bot): void {
         const oldName = wallet.name;
         const updated = await renameWallet(wallet.id, value);
         await ctx.reply(`✅ Nama Dompet Diperbarui!\n${wallet.emoji} ${oldName}  →  ${updated.emoji} ${updated.name}`);
+      } else if (field === 'emoji') {
+        const updated = await updateWalletEmoji(wallet.id, value.trim());
+        await ctx.reply(`✅ Emoji Dompet Diperbarui!\n${updated.emoji} ${updated.name}`);
       } else {
-        await ctx.reply('Field tidak dikenali. Gunakan: saldo atau nama');
+        await ctx.reply('Field tidak dikenali. Gunakan: saldo, nama, atau emoji');
       }
       return;
     }
@@ -311,15 +332,28 @@ export function registerCommands(bot: Bot): void {
   // Alias: /tambah_dompet
   bot.command('tambah_dompet', async (ctx) => {
     if (!ctx.from) return;
-    const args = ctx.match?.trim().split(/\s+/) ?? [];
-    const name = args[0];
-    const balanceStr = args[1];
-    if (!name) {
-      await ctx.reply('Gunakan: /tambah_dompet <nama> <saldo>\nContoh: /tambah_dompet dana 200rb');
+    const rest = ctx.match?.trim().split(/\s+/) ?? [];
+    if (rest.length === 0 || !rest[0]) {
+      await ctx.reply('Gunakan: /tambah_dompet <nama> [saldo]\nContoh: /tambah_dompet 🛴 Beam 50rb');
       return;
     }
-    const balance = parseAmount(balanceStr ?? '0') ?? 0;
-    const wallet = await createWallet(ctx.from.id, name, balance);
+
+    let balance = 0;
+    const nameParts: string[] = [];
+
+    for (const part of rest) {
+      const parsed = parseAmount(part);
+      if (parsed !== null && balance === 0 && (part.match(/\d/) || part.toLowerCase().includes('k') || part.toLowerCase().includes('rb') || part.toLowerCase().includes('jt'))) {
+        balance = parsed;
+      } else {
+        nameParts.push(part);
+      }
+    }
+
+    const rawName = nameParts.join(' ');
+    if (!rawName) { await ctx.reply('❌ Nama dompet tidak boleh kosong.'); return; }
+
+    const wallet = await createWallet(ctx.from.id, rawName, balance);
     await ctx.reply(`✅ Dompet Baru Ditambahkan!\n${SEP}\n${wallet.emoji} ${wallet.name}\n💰 Saldo awal   ${formatCurrency(wallet.balance)}`);
   });
 

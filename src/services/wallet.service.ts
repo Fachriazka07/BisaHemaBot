@@ -1,5 +1,6 @@
 import { supabase } from '../db/client';
 import type { Wallet } from '../types';
+import { extractEmoji, getDefaultEmojiForWallet } from '../utils/emoji';
 
 // ─────────────────────────────────────────────────────────
 // Default wallets untuk user baru
@@ -38,11 +39,14 @@ export async function findWalletByName(
   userId: number,
   name: string
 ): Promise<Wallet | null> {
+  const { cleanText } = extractEmoji(name);
+  const searchName = cleanText.toLowerCase();
+
   const { data, error } = await supabase
     .from('wallets')
     .select('*')
     .eq('user_id', userId)
-    .ilike('name', name); // exact case-insensitive
+    .ilike('name', searchName);
 
   if (error) throw new Error(`findWalletByName: ${error.message}`);
 
@@ -53,7 +57,7 @@ export async function findWalletByName(
     .from('wallets')
     .select('*')
     .eq('user_id', userId)
-    .ilike('name', `${name}%`);
+    .ilike('name', `${searchName}%`);
 
   if (err2) throw new Error(`findWalletByName partial: ${err2.message}`);
   return partial && partial.length > 0 ? (partial[0] as Wallet) : null;
@@ -65,13 +69,21 @@ export async function findWalletByName(
 
 export async function createWallet(
   userId: number,
-  name: string,
+  rawName: string,
   balance: number,
-  emoji = '💵'
+  customEmoji?: string
 ): Promise<Wallet> {
+  const { emoji: extractedEmoji, cleanText } = extractEmoji(rawName);
+  const name = cleanText.toLowerCase();
+
+  const finalEmoji =
+    customEmoji && customEmoji !== '💵'
+      ? customEmoji
+      : extractedEmoji ?? getDefaultEmojiForWallet(name);
+
   const { data, error } = await supabase
     .from('wallets')
-    .insert({ user_id: userId, name: name.toLowerCase(), balance, emoji })
+    .insert({ user_id: userId, name, balance, emoji: finalEmoji })
     .select()
     .single();
 
@@ -109,14 +121,35 @@ export async function renameWallet(
   walletId: string,
   newName: string
 ): Promise<Wallet> {
+  const { emoji: extractedEmoji, cleanText } = extractEmoji(newName);
+  const name = cleanText.toLowerCase();
+
+  const updates: Partial<Wallet> = { name };
+  if (extractedEmoji) updates.emoji = extractedEmoji;
+
   const { data, error } = await supabase
     .from('wallets')
-    .update({ name: newName.toLowerCase() })
+    .update(updates)
     .eq('id', walletId)
     .select()
     .single();
 
   if (error) throw new Error(`renameWallet: ${error.message}`);
+  return data as Wallet;
+}
+
+export async function updateWalletEmoji(
+  walletId: string,
+  emoji: string
+): Promise<Wallet> {
+  const { data, error } = await supabase
+    .from('wallets')
+    .update({ emoji })
+    .eq('id', walletId)
+    .select()
+    .single();
+
+  if (error) throw new Error(`updateWalletEmoji: ${error.message}`);
   return data as Wallet;
 }
 

@@ -299,7 +299,9 @@ export function registerCallbacks(bot: Bot): void {
           .text('💰 Edit Saldo', `dompet:edit_saldo:${walletId}`)
           .text('✏️ Rename', `dompet:edit_nama:${walletId}`)
           .row()
+          .text('🎨 Ganti Emoji', `dompet:edit_emoji:${walletId}`)
           .text('🗑️ Hapus', `delete_wallet:${walletId}`)
+          .row()
           .text('← Kembali', 'dompet:edit_menu');
 
         await safeEdit(
@@ -326,7 +328,23 @@ export function registerCallbacks(bot: Bot): void {
         const wallets = await getAllWallets(userId);
         const wallet = wallets.find((w) => w.id === walletId);
         setAwaitingInput(userId, 'edit_nama_dompet', { walletId, walletName: wallet?.name ?? '' });
-        await safeEdit(ctx, `Ketik nama baru untuk dompet ${wallet?.emoji ?? ''} ${wallet?.name ?? '?'}:`);
+        await safeEdit(
+          ctx,
+          `✏️ *Rename Dompet ${wallet?.emoji ?? ''} ${wallet?.name ?? ''}*\n${SEP}\nKetik nama baru untuk dompet ini:`
+        );
+        await ctx.answerCallbackQuery();
+        return;
+      }
+
+      if (data.startsWith('dompet:edit_emoji:')) {
+        const walletId = data.replace('dompet:edit_emoji:', '');
+        const wallets = await getAllWallets(userId);
+        const wallet = wallets.find((w) => w.id === walletId);
+        setAwaitingInput(userId, 'edit_emoji_dompet', { walletId, walletName: wallet?.name ?? '' });
+        await safeEdit(
+          ctx,
+          `🎨 *Ganti Emoji Dompet ${wallet?.emoji ?? ''} ${wallet?.name ?? ''}*\n${SEP}\nKirim emoji baru untuk dompet ini:`
+        );
         await ctx.answerCallbackQuery();
         return;
       }

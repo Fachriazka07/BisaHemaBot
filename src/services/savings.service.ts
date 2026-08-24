@@ -1,5 +1,6 @@
 import { supabase } from '../db/client';
 import type { Wallet } from '../types';
+import { extractEmoji, getDefaultEmojiForGoal } from '../utils/emoji';
 
 // ─────────────────────────────────────────────────────────
 // SAVINGS GOALS SERVICE
@@ -54,11 +55,19 @@ export async function getGoalById(goalId: string): Promise<SavingsGoal | null> {
 // CREATE
 export async function createGoal(
   userId: number,
-  name: string,
+  rawName: string,
   targetAmount: number,
   deadline?: string,
-  emoji = '🎯'
+  customEmoji?: string
 ): Promise<SavingsGoal> {
+  const { emoji: extractedEmoji, cleanText } = extractEmoji(rawName);
+  const name = cleanText.toLowerCase();
+
+  const finalEmoji =
+    customEmoji && customEmoji !== '🎯'
+      ? customEmoji
+      : extractedEmoji ?? getDefaultEmojiForGoal(name);
+
   const { data, error } = await supabase
     .from('savings_goals')
     .insert({
@@ -67,7 +76,7 @@ export async function createGoal(
       target_amount: targetAmount,
       current_amount: 0,
       deadline: deadline ?? null,
-      emoji,
+      emoji: finalEmoji,
     })
     .select()
     .single();

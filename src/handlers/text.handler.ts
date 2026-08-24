@@ -29,6 +29,7 @@ import {
   createWallet,
   updateWalletBalance,
   renameWallet,
+  updateWalletEmoji,
 } from '../services/wallet.service';
 import {
   createCategory,
@@ -335,10 +336,21 @@ async function handleAwaitingInput(
   switch (action) {
     case 'tambah_dompet': {
       const parts = input.split(/\s+/);
-      const name = parts[0];
-      if (!name) { await ctx.reply('❌ Ketik nama dompet.'); return; }
-      const balance = parseAmount(parts[1] ?? '0') ?? 0;
-      const wallet = await createWallet(userId, name, balance);
+      let balance = 0;
+      const nameParts: string[] = [];
+
+      for (const part of parts) {
+        const parsed = parseAmount(part);
+        if (parsed !== null && balance === 0 && (part.match(/\d/) || part.toLowerCase().includes('k') || part.toLowerCase().includes('rb') || part.toLowerCase().includes('jt'))) {
+          balance = parsed;
+        } else {
+          nameParts.push(part);
+        }
+      }
+
+      const rawName = nameParts.join(' ');
+      if (!rawName) { await ctx.reply('❌ Ketik nama dompet.'); return; }
+      const wallet = await createWallet(userId, rawName, balance);
       await ctx.reply(`✅ Dompet Ditambahkan!\n${SEP}\n${wallet.emoji} ${wallet.name}\n💰 Saldo awal: ${formatCurrency(wallet.balance)}`);
       return;
     }
@@ -352,6 +364,12 @@ async function handleAwaitingInput(
     case 'edit_nama_dompet': {
       const updated = await renameWallet(data.walletId, input);
       await ctx.reply(`✅ Dompet renamed: ${updated.emoji} ${updated.name}`);
+      return;
+    }
+    case 'edit_emoji_dompet': {
+      const emoji = input.trim();
+      const updated = await updateWalletEmoji(data.walletId, emoji);
+      await ctx.reply(`✅ Emoji dompet diperbarui: ${updated.emoji} ${updated.name}`);
       return;
     }
     case 'tambah_kategori': {
