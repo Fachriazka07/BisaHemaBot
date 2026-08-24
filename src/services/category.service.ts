@@ -88,6 +88,17 @@ export async function getAllCategories(userId: number): Promise<Category[]> {
   return data as Category[];
 }
 
+export async function getCategoryById(categoryId: string): Promise<Category | null> {
+  const { data, error } = await supabase
+    .from('categories')
+    .select('*')
+    .eq('id', categoryId)
+    .single();
+
+  if (error || !data) return null;
+  return data as Category;
+}
+
 /**
  * Cari kategori berdasarkan nama (exact case-insensitive dulu, lalu partial)
  */

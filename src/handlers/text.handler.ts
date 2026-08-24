@@ -58,11 +58,25 @@ export async function handleTextInput(ctx: Context): Promise<void> {
   const text = ctx.message?.text;
   if (!text || !ctx.from) return;
   const userId = ctx.from.id;
+  const trimmed = text.trim();
+  const lower = trimmed.toLowerCase();
+
+  // ── 0. CLEAR AWAITING INPUT IF COMMAND OR BATAL ───────
+  if (trimmed.startsWith('/') || lower === 'batal' || lower === 'cancel') {
+    consumeAwaitingInput(userId);
+    if (lower === 'batal' || lower === 'cancel') {
+      await ctx.reply('❌ Sesi input dibatalkan.');
+      return;
+    }
+    if (trimmed.startsWith('/')) {
+      return;
+    }
+  }
 
   // ── 1. CHECK AWAITING INPUT (from inline keyboard) ───
   const pending = consumeAwaitingInput(userId);
   if (pending) {
-    await handleAwaitingInput(ctx, pending.action, pending.data, text.trim());
+    await handleAwaitingInput(ctx, pending.action, pending.data, trimmed);
     return;
   }
 

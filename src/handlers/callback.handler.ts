@@ -13,6 +13,7 @@ import {
 } from '../services/wallet.service';
 import {
   getAllCategories,
+  getCategoryById,
   deleteCategory,
   createCategory,
   createDefaultCategories,
@@ -413,16 +414,24 @@ export function registerCallbacks(bot: Bot): void {
 
       if (data.startsWith('kat:edit_nama:')) {
         const catId = data.replace('kat:edit_nama:', '');
+        const cat = await getCategoryById(catId);
         setAwaitingInput(userId, 'edit_nama_kategori', { catId });
-        await safeEdit(ctx, 'Ketik nama baru untuk kategori ini:');
+        await safeEdit(
+          ctx,
+          `✏️ *Rename Kategori ${cat?.emoji ?? '📂'} ${cat?.name ?? ''}*\n${SEP}\nKetik nama baru untuk kategori ini:`
+        );
         await ctx.answerCallbackQuery();
         return;
       }
 
       if (data.startsWith('kat:edit_emoji:')) {
         const catId = data.replace('kat:edit_emoji:', '');
+        const cat = await getCategoryById(catId);
         setAwaitingInput(userId, 'edit_emoji_kategori', { catId });
-        await safeEdit(ctx, 'Kirim emoji baru untuk kategori ini:');
+        await safeEdit(
+          ctx,
+          `🎨 *Ganti Emoji Kategori ${cat?.emoji ?? '📂'} ${cat?.name ?? ''}*\n${SEP}\nKirim emoji baru untuk kategori ini:`
+        );
         await ctx.answerCallbackQuery();
         return;
       }
@@ -572,32 +581,48 @@ export function registerCallbacks(bot: Bot): void {
 
       if (data.startsWith('goals:edit_target_prompt:')) {
         const goalId = data.replace('goals:edit_target_prompt:', '');
+        const goal = await getGoalById(goalId);
         setAwaitingInput(userId, 'edit_target_goal', { goalId });
-        await safeEdit(ctx, 'Masukkan nominal target baru:');
+        await safeEdit(
+          ctx,
+          `🎯 *Edit Target Goal ${goal?.emoji ?? '🎯'} ${goal?.name ?? ''}*\n${SEP}\nTarget saat ini: ${formatCurrency(goal?.target_amount ?? 0)}\n\nKetik nominal target baru:`
+        );
         await ctx.answerCallbackQuery();
         return;
       }
 
       if (data.startsWith('goals:edit_current_prompt:')) {
         const goalId = data.replace('goals:edit_current_prompt:', '');
+        const goal = await getGoalById(goalId);
         setAwaitingInput(userId, 'edit_current_goal', { goalId });
-        await safeEdit(ctx, 'Masukkan nominal saldo terkumpul baru:');
+        await safeEdit(
+          ctx,
+          `💰 *Edit Terkumpul Goal ${goal?.emoji ?? '🎯'} ${goal?.name ?? ''}*\n${SEP}\nTerkumpul saat ini: ${formatCurrency(goal?.current_amount ?? 0)}\n\nKetik nominal terkumpul baru:`
+        );
         await ctx.answerCallbackQuery();
         return;
       }
 
       if (data.startsWith('goals:edit_name_prompt:')) {
         const goalId = data.replace('goals:edit_name_prompt:', '');
+        const goal = await getGoalById(goalId);
         setAwaitingInput(userId, 'edit_name_goal', { goalId });
-        await safeEdit(ctx, 'Ketik nama baru untuk goal ini:');
+        await safeEdit(
+          ctx,
+          `✏️ *Rename Goal ${goal?.emoji ?? '🎯'} ${goal?.name ?? ''}*\n${SEP}\nKetik nama baru untuk goal ini:`
+        );
         await ctx.answerCallbackQuery();
         return;
       }
 
       if (data.startsWith('goals:edit_emoji_prompt:')) {
         const goalId = data.replace('goals:edit_emoji_prompt:', '');
+        const goal = await getGoalById(goalId);
         setAwaitingInput(userId, 'edit_emoji_goal', { goalId });
-        await safeEdit(ctx, 'Kirim emoji baru untuk goal ini:');
+        await safeEdit(
+          ctx,
+          `🎨 *Ganti Emoji Goal ${goal?.emoji ?? '🎯'} ${goal?.name ?? ''}*\n${SEP}\nKirim emoji baru untuk goal ini:`
+        );
         await ctx.answerCallbackQuery();
         return;
       }
