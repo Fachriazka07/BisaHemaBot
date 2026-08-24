@@ -7,8 +7,11 @@ export default async function handler(req: any, res: any) {
 
   if (req.method === 'POST') {
     try {
+      if (!bot.isInited()) {
+        await bot.init();
+      }
       const update = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
-      if (update && typeof update === 'object') {
+      if (update && typeof update === 'object' && update.update_id) {
         await bot.handleUpdate(update);
       }
       return res.status(200).json({ ok: true });
