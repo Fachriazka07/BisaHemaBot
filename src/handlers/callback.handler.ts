@@ -2,6 +2,8 @@ import { type Bot, InputFile, InlineKeyboard } from 'grammy';
 import {
   softDeleteTransaction,
   getTransactionById,
+  createExpense,
+  createIncome,
 } from '../services/transaction.service';
 import {
   getAllWallets,
@@ -11,6 +13,7 @@ import {
 import {
   getAllCategories,
   deleteCategory,
+  createCategory,
 } from '../services/category.service';
 import {
   deleteGoal,
@@ -28,6 +31,7 @@ import {
   formatProgressBar,
   formatDateTime,
 } from '../utils/formatter';
+import { afterTransactionKeyboard } from '../utils/keyboard';
 
 const SEP = '━━━━━━━━━━━━━━━━━━━━';
 
@@ -61,6 +65,30 @@ export function consumeAwaitingInput(userId: number): { action: string; data: Re
   return { action: state.action, data: state.data };
 }
 
+/** Helper aman untuk editMessageText (mencegah error 400 Bad Request) */
+async function safeEdit(
+  ctx: any,
+  text: string,
+  extra?: { reply_markup?: InlineKeyboard; parse_mode?: 'Markdown' | 'HTML' }
+): Promise<void> {
+  try {
+    await ctx.editMessageText(text, extra);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : '';
+    if (msg.includes('message is not modified')) return;
+
+    try {
+      if (ctx.callbackQuery?.message?.photo) {
+        await ctx.editMessageCaption(text, extra);
+      } else {
+        await ctx.reply(text, extra);
+      }
+    } catch {
+      await ctx.reply(text, extra).catch(() => {});
+    }
+  }
+}
+
 // ─────────────────────────────────────────────────────────
 // Register all callback query handlers
 // ─────────────────────────────────────────────────────────
@@ -76,8 +104,8 @@ export function registerCallbacks(bot: Bot): void {
       if (data.startsWith('confirm_delete:')) {
         const txId = data.replace('confirm_delete:', '');
         await softDeleteTransaction(txId, userId);
-        await ctx.editMessageText('✅ Transaksi dihapus.\nSaldo dompet sudah dikembalikan.');
-        await ctx.answerCallbackQuery();
+        await safeEdit(ctx, '✅ Transaksi dihapus.\nSaldo dompet sudah dikembalikan.');
+        await ctx.answerCallbackQuery('Hapus berhasil');
         return;
       }
 
@@ -87,14 +115,115 @@ export function registerCallbacks(bot: Bot): void {
         const kb = new InlineKeyboard()
           .text('✅ Ya, Hapus', `confirm_delete:${txId}`)
           .text('❌ Tidak', 'cancel_action');
-        await ctx.editMessageReplyMarkup({ reply_markup: kb });
+        try {
+          await ctx.editMessageReplyMarkup({ reply_markup: kb });
+        } catch {
+          // ignore
+        }
         await ctx.answerCallbackQuery('Konfirmasi hapus?');
         return;
       }
 
       if (data === 'cancel_action' || data === 'cancel_delete') {
-        await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } });
+        try {
+          await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } });
+        } catch {
+          // ignore
+        }
         await ctx.answerCallbackQuery('Dibatalkan.');
+        return;
+      }
+
+      // ── REPEAT TRANSACTION ──────────────────
+      if (data.startsWith('repeat:')) {
+        const txId = data.replace('repeat:', '');
+        const tx = await getTransactionById(txId);
+        if (!tx) { await ctx.answerCallbackQuery('Transaksi tidak ditemukan.'); return; }
+
+        const wallets = await getAllWallets(userId);
+        const wallet = wallets.find((w) => w.id === tx.wallet_id);
+        if (!wallet) { await ctx.answerCallbackQuery('Dompet tidak ditemukan.'); return; }
+
+        if (tx.type === 'expense') {
+          const cats = await getAllCategories(userId);
+          const cat = cats.find((c) => c.id === tx.category_id);
+          const result = await createExpense(userId, wallet.name, cat?.name ?? 'lainnya', Number(tx.amount), tx.description ?? undefined);
+          await ctx.reply(
+            `✅ Transaksi Diulangi!\n${SEP}\n❤️ ${cat?.emoji ?? '📦'} ${cat?.name ?? 'Pengeluaran'}  ${formatCurrency(Number(tx.amount))}\n💳 ${wallet.emoji} ${wallet.name} (sisa: ${formatCurrency(result.wallet.balance)})`,
+            { reply_markup: afterTransactionKeyboard(result.transaction.id) }
+          );
+        } else if (tx.type === 'income') {
+          const cats = await getAllCategories(userId);
+          const cat = cats.find((c) => c.id === tx.category_id);
+          const result = await createIncome(userId, wallet.name, cat?.name ?? 'lainnya', Number(tx.amount), tx.description ?? undefined);
+          await ctx.reply(
+            `✅ Transaksi Diulangi!\n${SEP}\n💚 ${cat?.emoji ?? '📦'} ${cat?.name ?? 'Pemasukan'}  ${formatCurrency(Number(tx.amount))}\n💳 ${wallet.emoji} ${wallet.name} (saldo: ${formatCurrency(result.wallet.balance)})`,
+            { reply_markup: afterTransactionKeyboard(result.transaction.id) }
+          );
+        }
+        await ctx.answerCallbackQuery('Diulangi!');
+        return;
+      }
+
+      // ── EDIT TRANSACTION (from transaction keyboard) ──
+      if (data.startsWith('edit:') && !data.startsWith('edit_select:') && !data.startsWith('edit_tx_amount:')) {
+        const txId = data.replace('edit:', '');
+        const tx = await getTransactionById(txId);
+        if (!tx) { await ctx.answerCallbackQuery('Transaksi tidak ditemukan.'); return; }
+
+        const kb = new InlineKeyboard()
+          .text('💰 Edit Nominal', `edit_tx_amount:${txId}`)
+          .text('🗑️ Hapus', `confirm_delete:${txId}`)
+          .row()
+          .text('Batal', 'cancel_action');
+
+        await safeEdit(
+          ctx,
+          `Transaksi: ${formatCurrency(Number(tx.amount))} (${tx.type})\n🕐 ${formatDateTime(tx.created_at)}\n${tx.description ? `📝 ${tx.description}\n` : ''}\nPilih aksi:`,
+          { reply_markup: kb }
+        );
+        await ctx.answerCallbackQuery();
+        return;
+      }
+
+      // ── SUGGEST CATEGORY CALLBACKS ──────────
+      if (data.startsWith('use_cat:')) {
+        const parts = data.replace('use_cat:', '').split(':');
+        const catId = parts[0]!;
+        const txPayload = parts.slice(1).join(':');
+        const [walletName, amountStr, description] = txPayload.split('|');
+
+        const cats = await getAllCategories(userId);
+        const cat = cats.find((c) => c.id === catId);
+        if (!cat) { await ctx.answerCallbackQuery('Kategori tidak ditemukan.'); return; }
+        const amount = parseFloat(amountStr ?? '0');
+
+        const result = await createExpense(userId, walletName!, cat.name, amount, description || undefined);
+        await safeEdit(
+          ctx,
+          `✅ Transaksi Dicatat!\n${SEP}\n❤️ ${cat.emoji} ${cat.name}  ${formatCurrency(amount)}\n💳 ${result.wallet.emoji} ${result.wallet.name} (sisa: ${formatCurrency(result.wallet.balance)})`,
+          { reply_markup: afterTransactionKeyboard(result.transaction.id) }
+        );
+        await ctx.answerCallbackQuery('Kategori dipilih!');
+        return;
+      }
+
+      if (data.startsWith('new_cat:')) {
+        const parts = data.replace('new_cat:', '').split(':');
+        const catName = parts[0]!;
+        const txPayload = parts.slice(1).join(':');
+        const [walletName, amountStr, description] = txPayload.split('|');
+
+        const cat = await createCategory(userId, catName, 'expense');
+        const amount = parseFloat(amountStr ?? '0');
+
+        const result = await createExpense(userId, walletName!, cat.name, amount, description || undefined);
+        await safeEdit(
+          ctx,
+          `✅ Kategori Baru Ditambahkan & Transaksi Dicatat!\n${SEP}\n❤️ ${cat.emoji} ${cat.name}  ${formatCurrency(amount)}\n💳 ${result.wallet.emoji} ${result.wallet.name} (sisa: ${formatCurrency(result.wallet.balance)})`,
+          { reply_markup: afterTransactionKeyboard(result.transaction.id) }
+        );
+        await ctx.answerCallbackQuery('Kategori dibuat!');
         return;
       }
 
@@ -102,7 +231,6 @@ export function registerCallbacks(bot: Bot): void {
       // ██ DOMPET CALLBACKS
       // ══════════════════════════════════════════
 
-      // ── DELETE WALLET ──────────────────────
       if (data.startsWith('delete_wallet:')) {
         const walletId = data.replace('delete_wallet:', '');
         const wallets = await getAllWallets(userId);
@@ -110,11 +238,12 @@ export function registerCallbacks(bot: Bot): void {
           await ctx.answerCallbackQuery('❌ Minimal punya 1 dompet!');
           return;
         }
-        const wallet = wallets.find(w => w.id === walletId);
+        const wallet = wallets.find((w) => w.id === walletId);
         const kb = new InlineKeyboard()
           .text('✅ Ya, Hapus', `confirm_del_wallet:${walletId}`)
           .text('❌ Batal', 'cancel_action');
-        await ctx.editMessageText(
+        await safeEdit(
+          ctx,
           `🗑️ Hapus dompet ${wallet?.emoji ?? ''} ${wallet?.name ?? '?'}?\nSaldo: ${formatCurrency(wallet?.balance ?? 0)}\n\n⚠️ Riwayat transaksi tetap tersimpan.`,
           { reply_markup: kb }
         );
@@ -125,29 +254,26 @@ export function registerCallbacks(bot: Bot): void {
       if (data.startsWith('confirm_del_wallet:')) {
         const walletId = data.replace('confirm_del_wallet:', '');
         await deleteWallet(walletId);
-        await ctx.editMessageText('✅ Dompet dihapus.');
-        await ctx.answerCallbackQuery();
+        await safeEdit(ctx, '✅ Dompet dihapus.');
+        await ctx.answerCallbackQuery('Dompet dihapus!');
         return;
       }
 
-      // ── ADD WALLET (from suggestion) ───────
       if (data.startsWith('add_wallet:')) {
         const name = data.replace('add_wallet:', '');
         const wallet = await createWallet(userId, name, 0);
-        await ctx.editMessageText(`✅ Dompet ${wallet.emoji} ${wallet.name} ditambahkan dengan saldo Rp 0.\n\nCoba ulangi transaksi kamu.`);
-        await ctx.answerCallbackQuery();
+        await safeEdit(ctx, `✅ Dompet ${wallet.emoji} ${wallet.name} ditambahkan dengan saldo Rp 0.\n\nCoba ulangi transaksi kamu.`);
+        await ctx.answerCallbackQuery('Dompet dibuat!');
         return;
       }
 
-      // ── DOMPET: TAMBAH PROMPT ──────────────
       if (data === 'dompet:tambah_prompt') {
         setAwaitingInput(userId, 'tambah_dompet');
-        await ctx.editMessageText('Ketik nama dompet baru dan saldo awal:\n\nContoh: `dana 200rb` atau `mandiri 0`', { parse_mode: 'Markdown' });
+        await safeEdit(ctx, 'Ketik nama dompet baru dan saldo awal:\n\nContoh: `dana 200rb` atau `mandiri 0`');
         await ctx.answerCallbackQuery();
         return;
       }
 
-      // ── DOMPET: EDIT MENU ──────────────────
       if (data === 'dompet:edit_menu') {
         const wallets = await getAllWallets(userId);
         const kb = new InlineKeyboard();
@@ -155,16 +281,15 @@ export function registerCallbacks(bot: Bot): void {
           kb.text(`${w.emoji} ${w.name}`, `dompet:edit_pick:${w.id}`);
         });
         kb.row().text('Batal', 'cancel_action');
-        await ctx.editMessageText('Pilih dompet yang ingin diedit:', { reply_markup: kb });
+        await safeEdit(ctx, 'Pilih dompet yang ingin diedit:', { reply_markup: kb });
         await ctx.answerCallbackQuery();
         return;
       }
 
-      // ── DOMPET: EDIT PICK (pilih dompet) ───
       if (data.startsWith('dompet:edit_pick:')) {
         const walletId = data.replace('dompet:edit_pick:', '');
         const wallets = await getAllWallets(userId);
-        const wallet = wallets.find(w => w.id === walletId);
+        const wallet = wallets.find((w) => w.id === walletId);
         if (!wallet) { await ctx.answerCallbackQuery('❌ Dompet tidak ditemukan.'); return; }
 
         const kb = new InlineKeyboard()
@@ -174,7 +299,8 @@ export function registerCallbacks(bot: Bot): void {
           .text('🗑️ Hapus', `delete_wallet:${walletId}`)
           .text('← Kembali', 'dompet:edit_menu');
 
-        await ctx.editMessageText(
+        await safeEdit(
+          ctx,
           `Edit dompet ${wallet.emoji} ${wallet.name}:\nSaldo saat ini: ${formatCurrency(wallet.balance)}`,
           { reply_markup: kb }
         );
@@ -182,29 +308,26 @@ export function registerCallbacks(bot: Bot): void {
         return;
       }
 
-      // ── DOMPET: EDIT SALDO (awaiting input) ─
       if (data.startsWith('dompet:edit_saldo:')) {
         const walletId = data.replace('dompet:edit_saldo:', '');
         const wallets = await getAllWallets(userId);
-        const wallet = wallets.find(w => w.id === walletId);
+        const wallet = wallets.find((w) => w.id === walletId);
         setAwaitingInput(userId, 'edit_saldo_dompet', { walletId, walletName: wallet?.name ?? '' });
-        await ctx.editMessageText(`Masukkan saldo baru untuk ${wallet?.emoji ?? ''} ${wallet?.name ?? '?'}:\n(sebelumnya: ${formatCurrency(wallet?.balance ?? 0)})`);
+        await safeEdit(ctx, `Masukkan saldo baru untuk ${wallet?.emoji ?? ''} ${wallet?.name ?? '?'}:\n(sebelumnya: ${formatCurrency(wallet?.balance ?? 0)})`);
         await ctx.answerCallbackQuery();
         return;
       }
 
-      // ── DOMPET: EDIT NAMA (awaiting input) ──
       if (data.startsWith('dompet:edit_nama:')) {
         const walletId = data.replace('dompet:edit_nama:', '');
         const wallets = await getAllWallets(userId);
-        const wallet = wallets.find(w => w.id === walletId);
+        const wallet = wallets.find((w) => w.id === walletId);
         setAwaitingInput(userId, 'edit_nama_dompet', { walletId, walletName: wallet?.name ?? '' });
-        await ctx.editMessageText(`Ketik nama baru untuk dompet ${wallet?.emoji ?? ''} ${wallet?.name ?? '?'}:`);
+        await safeEdit(ctx, `Ketik nama baru untuk dompet ${wallet?.emoji ?? ''} ${wallet?.name ?? '?'}:`);
         await ctx.answerCallbackQuery();
         return;
       }
 
-      // ── DOMPET: HAPUS MENU ─────────────────
       if (data === 'dompet:hapus_menu') {
         const wallets = await getAllWallets(userId);
         if (wallets.length <= 1) {
@@ -216,7 +339,7 @@ export function registerCallbacks(bot: Bot): void {
           kb.text(`${w.emoji} ${w.name}`, `delete_wallet:${w.id}`);
         });
         kb.row().text('Batal', 'cancel_action');
-        await ctx.editMessageText('Pilih dompet yang ingin dihapus:', { reply_markup: kb });
+        await safeEdit(ctx, 'Pilih dompet yang ingin dihapus:', { reply_markup: kb });
         await ctx.answerCallbackQuery();
         return;
       }
@@ -225,23 +348,21 @@ export function registerCallbacks(bot: Bot): void {
       // ██ KATEGORI CALLBACKS
       // ══════════════════════════════════════════
 
-      // ── DELETE CATEGORY ────────────────────
       if (data.startsWith('delete_cat:')) {
         const catId = data.replace('delete_cat:', '');
         await deleteCategory(catId);
-        await ctx.editMessageText('✅ Kategori dihapus.');
-        await ctx.answerCallbackQuery();
+        await safeEdit(ctx, '✅ Kategori dihapus.');
+        await ctx.answerCallbackQuery('Kategori dihapus!');
         return;
       }
 
-      // ── KATEGORI: TAMBAH PROMPT ────────────
       if (data === 'kat:tambah_prompt') {
         const kb = new InlineKeyboard()
           .text('💸 Pengeluaran', 'kat:tambah_type:expense')
           .text('💚 Pemasukan', 'kat:tambah_type:income')
           .row()
           .text('Batal', 'cancel_action');
-        await ctx.editMessageText('Kategori baru — pilih tipe:', { reply_markup: kb });
+        await safeEdit(ctx, 'Kategori baru — pilih tipe:', { reply_markup: kb });
         await ctx.answerCallbackQuery();
         return;
       }
@@ -249,12 +370,11 @@ export function registerCallbacks(bot: Bot): void {
       if (data.startsWith('kat:tambah_type:')) {
         const type = data.replace('kat:tambah_type:', '') as 'expense' | 'income';
         setAwaitingInput(userId, 'tambah_kategori', { type });
-        await ctx.editMessageText(`Ketik nama kategori baru (tipe: ${type === 'expense' ? 'pengeluaran' : 'pemasukan'}):`);
+        await safeEdit(ctx, `Ketik nama kategori baru (tipe: ${type === 'expense' ? 'pengeluaran' : 'pemasukan'}):`);
         await ctx.answerCallbackQuery();
         return;
       }
 
-      // ── KATEGORI: EDIT MENU ────────────────
       if (data === 'kat:edit_menu') {
         const cats = await getAllCategories(userId);
         const kb = new InlineKeyboard();
@@ -262,16 +382,15 @@ export function registerCallbacks(bot: Bot): void {
           kb.text(`${c.emoji} ${c.name}`, `kat:edit_pick:${c.id}`);
         });
         kb.row().text('Batal', 'cancel_action');
-        await ctx.editMessageText('Pilih kategori yang ingin diedit:', { reply_markup: kb });
+        await safeEdit(ctx, 'Pilih kategori yang ingin diedit:', { reply_markup: kb });
         await ctx.answerCallbackQuery();
         return;
       }
 
-      // ── KATEGORI: EDIT PICK ────────────────
       if (data.startsWith('kat:edit_pick:')) {
         const catId = data.replace('kat:edit_pick:', '');
         const cats = await getAllCategories(userId);
-        const cat = cats.find(c => c.id === catId);
+        const cat = cats.find((c) => c.id === catId);
         if (!cat) { await ctx.answerCallbackQuery('❌ Kategori tidak ditemukan.'); return; }
 
         const kb = new InlineKeyboard()
@@ -281,7 +400,8 @@ export function registerCallbacks(bot: Bot): void {
           .text('🗑️ Hapus', `delete_cat:${catId}`)
           .text('← Kembali', 'kat:edit_menu');
 
-        await ctx.editMessageText(
+        await safeEdit(
+          ctx,
           `Edit kategori ${cat.emoji} ${cat.name}  (${cat.type})`,
           { reply_markup: kb }
         );
@@ -289,25 +409,22 @@ export function registerCallbacks(bot: Bot): void {
         return;
       }
 
-      // ── KATEGORI: EDIT NAMA ────────────────
       if (data.startsWith('kat:edit_nama:')) {
         const catId = data.replace('kat:edit_nama:', '');
         setAwaitingInput(userId, 'edit_nama_kategori', { catId });
-        await ctx.editMessageText('Ketik nama baru untuk kategori ini:');
+        await safeEdit(ctx, 'Ketik nama baru untuk kategori ini:');
         await ctx.answerCallbackQuery();
         return;
       }
 
-      // ── KATEGORI: EDIT EMOJI ───────────────
       if (data.startsWith('kat:edit_emoji:')) {
         const catId = data.replace('kat:edit_emoji:', '');
         setAwaitingInput(userId, 'edit_emoji_kategori', { catId });
-        await ctx.editMessageText('Kirim emoji baru untuk kategori ini:');
+        await safeEdit(ctx, 'Kirim emoji baru untuk kategori ini:');
         await ctx.answerCallbackQuery();
         return;
       }
 
-      // ── KATEGORI: HAPUS MENU ───────────────
       if (data === 'kat:hapus_menu') {
         const cats = await getAllCategories(userId);
         const kb = new InlineKeyboard();
@@ -315,7 +432,7 @@ export function registerCallbacks(bot: Bot): void {
           kb.text(`${c.emoji} ${c.name}`, `delete_cat:${c.id}`);
         });
         kb.row().text('Batal', 'cancel_action');
-        await ctx.editMessageText('Pilih kategori yang ingin dihapus:', { reply_markup: kb });
+        await safeEdit(ctx, 'Pilih kategori yang ingin dihapus:', { reply_markup: kb });
         await ctx.answerCallbackQuery();
         return;
       }
@@ -327,14 +444,14 @@ export function registerCallbacks(bot: Bot): void {
       if (data.startsWith('delete_goal:')) {
         const goalId = data.replace('delete_goal:', '');
         await deleteGoal(goalId);
-        await ctx.editMessageText('✅ Goal dihapus.');
-        await ctx.answerCallbackQuery();
+        await safeEdit(ctx, '✅ Goal dihapus.');
+        await ctx.answerCallbackQuery('Goal dihapus!');
         return;
       }
 
       if (data === 'goals:tambah_prompt') {
         setAwaitingInput(userId, 'tambah_goal');
-        await ctx.editMessageText('Ketik nama goal dan target:\n\nContoh: `laptop 5jt` atau `liburan 3jt`', { parse_mode: 'Markdown' });
+        await safeEdit(ctx, 'Ketik nama goal dan target:\n\nContoh: `laptop 5jt` atau `liburan 3jt`');
         await ctx.answerCallbackQuery();
         return;
       }
@@ -350,7 +467,7 @@ export function registerCallbacks(bot: Bot): void {
           kb.text(`${g.emoji} ${g.name}`, `goals:setor_pick:${g.id}`);
         });
         kb.row().text('Batal', 'cancel_action');
-        await ctx.editMessageText('Setor ke goal mana?', { reply_markup: kb });
+        await safeEdit(ctx, 'Setor ke goal mana?', { reply_markup: kb });
         await ctx.answerCallbackQuery();
         return;
       }
@@ -367,7 +484,8 @@ export function registerCallbacks(bot: Bot): void {
         kb.row().text('🚫 Tanpa Dompet', `goals:setor_wallet:${goalId}:none`);
         kb.row().text('Batal', 'cancel_action');
 
-        await ctx.editMessageText(
+        await safeEdit(
+          ctx,
           `Pilih dompet yang dipotong untuk setor ke ${goal?.emoji ?? '🎯'} ${goal?.name ?? 'goal'}:`,
           { reply_markup: kb }
         );
@@ -380,7 +498,7 @@ export function registerCallbacks(bot: Bot): void {
         const goalId = parts[0]!;
         const walletId = parts[1]!;
         setAwaitingInput(userId, 'setor_goal', { goalId, walletId });
-        await ctx.editMessageText('Masukkan nominal setoran:');
+        await safeEdit(ctx, 'Masukkan nominal setoran:');
         await ctx.answerCallbackQuery();
         return;
       }
@@ -398,12 +516,13 @@ export function registerCallbacks(bot: Bot): void {
           const bar = formatProgressBar(updated.current_amount, updated.target_amount);
           const walletMsg = wallet ? `\n💳 Terpotong dari: ${wallet.emoji} ${wallet.name} (-${formatCurrency(amount)})` : '';
 
-          await ctx.editMessageText(
+          await safeEdit(
+            ctx,
             `✅ Setoran Berhasil!\n${SEP}\n${updated.emoji} ${updated.name}\n${bar}  ${pct}%\n${formatCurrency(updated.current_amount)} / ${formatCurrency(updated.target_amount)}${walletMsg}\n\n${remaining > 0 ? `Tinggal ${formatCurrency(remaining)} lagi 💪` : '🎉 Goal tercapai!'}`
           );
         } catch (err) {
           const msg = err instanceof Error ? err.message : 'Terjadi kesalahan.';
-          await ctx.editMessageText(`❌ ${msg}`);
+          await safeEdit(ctx, `❌ ${msg}`);
         }
         await ctx.answerCallbackQuery();
         return;
@@ -420,7 +539,7 @@ export function registerCallbacks(bot: Bot): void {
           kb.text(`${g.emoji} ${g.name}`, `goals:edit_pick:${g.id}`);
         });
         kb.row().text('Batal', 'cancel_action');
-        await ctx.editMessageText('Pilih goal yang ingin diedit:', { reply_markup: kb });
+        await safeEdit(ctx, 'Pilih goal yang ingin diedit:', { reply_markup: kb });
         await ctx.answerCallbackQuery();
         return;
       }
@@ -440,7 +559,8 @@ export function registerCallbacks(bot: Bot): void {
           .text('🗑️ Hapus', `delete_goal:${goalId}`)
           .text('← Kembali', 'goals:edit_menu');
 
-        await ctx.editMessageText(
+        await safeEdit(
+          ctx,
           `Edit goal ${goal.emoji} ${goal.name}:\n🎯 Target: ${formatCurrency(goal.target_amount)}\n💰 Terkumpul: ${formatCurrency(goal.current_amount)}`,
           { reply_markup: kb }
         );
@@ -451,7 +571,7 @@ export function registerCallbacks(bot: Bot): void {
       if (data.startsWith('goals:edit_target_prompt:')) {
         const goalId = data.replace('goals:edit_target_prompt:', '');
         setAwaitingInput(userId, 'edit_target_goal', { goalId });
-        await ctx.editMessageText('Masukkan nominal target baru:');
+        await safeEdit(ctx, 'Masukkan nominal target baru:');
         await ctx.answerCallbackQuery();
         return;
       }
@@ -459,7 +579,7 @@ export function registerCallbacks(bot: Bot): void {
       if (data.startsWith('goals:edit_current_prompt:')) {
         const goalId = data.replace('goals:edit_current_prompt:', '');
         setAwaitingInput(userId, 'edit_current_goal', { goalId });
-        await ctx.editMessageText('Masukkan nominal saldo terkumpul baru:');
+        await safeEdit(ctx, 'Masukkan nominal saldo terkumpul baru:');
         await ctx.answerCallbackQuery();
         return;
       }
@@ -467,7 +587,7 @@ export function registerCallbacks(bot: Bot): void {
       if (data.startsWith('goals:edit_name_prompt:')) {
         const goalId = data.replace('goals:edit_name_prompt:', '');
         setAwaitingInput(userId, 'edit_name_goal', { goalId });
-        await ctx.editMessageText('Ketik nama baru untuk goal ini:');
+        await safeEdit(ctx, 'Ketik nama baru untuk goal ini:');
         await ctx.answerCallbackQuery();
         return;
       }
@@ -475,7 +595,7 @@ export function registerCallbacks(bot: Bot): void {
       if (data.startsWith('goals:edit_emoji_prompt:')) {
         const goalId = data.replace('goals:edit_emoji_prompt:', '');
         setAwaitingInput(userId, 'edit_emoji_goal', { goalId });
-        await ctx.editMessageText('Kirim emoji baru untuk goal ini:');
+        await safeEdit(ctx, 'Kirim emoji baru untuk goal ini:');
         await ctx.answerCallbackQuery();
         return;
       }
@@ -494,8 +614,9 @@ export function registerCallbacks(bot: Bot): void {
           .text('🗑️ Hapus', `confirm_delete:${txId}`)
           .row()
           .text('Batal', 'cancel_action');
-        await ctx.editMessageText(
-          `Transaksi: ${formatCurrency(tx.amount)} (${tx.type})\n🕐 ${formatDateTime(tx.created_at)}\n${tx.description ? `📝 ${tx.description}\n` : ''}\nPilih aksi:`,
+        await safeEdit(
+          ctx,
+          `Transaksi: ${formatCurrency(Number(tx.amount))} (${tx.type})\n🕐 ${formatDateTime(tx.created_at)}\n${tx.description ? `📝 ${tx.description}\n` : ''}\nPilih aksi:`,
           { reply_markup: kb }
         );
         await ctx.answerCallbackQuery();
@@ -505,7 +626,7 @@ export function registerCallbacks(bot: Bot): void {
       if (data.startsWith('edit_tx_amount:')) {
         const txId = data.replace('edit_tx_amount:', '');
         setAwaitingInput(userId, 'edit_tx_amount', { txId });
-        await ctx.editMessageText('Masukkan nominal transaksi baru:');
+        await safeEdit(ctx, 'Masukkan nominal transaksi baru:');
         await ctx.answerCallbackQuery();
         return;
       }
@@ -534,13 +655,18 @@ export function registerCallbacks(bot: Bot): void {
           }
         }
 
+        if (report.incomeByCategory.length > 0) {
+          lines.push('', '─── PEMASUKAN PER KATEGORI ─────');
+          for (const c of report.incomeByCategory) {
+            lines.push(`${c.emoji} ${c.category.padEnd(14)} ${formatCurrency(c.amount)}  ${c.pct}%`);
+          }
+        }
+
         const kb = new InlineKeyboard()
-          .text('📈 Chart', 'menu:chart')
           .text('📅 Hari', 'report:hari')
           .text('📅 Minggu', 'report:minggu')
           .text('📅 Bulan', 'report:bulan');
-
-        await ctx.editMessageText(lines.join('\n'), { reply_markup: kb });
+        await safeEdit(ctx, lines.join('\n'), { reply_markup: kb });
         await ctx.answerCallbackQuery();
         return;
       }
@@ -573,13 +699,17 @@ export function registerCallbacks(bot: Bot): void {
         const newState = !(current?.enabled ?? true);
         await toggleReminder(userId, newState);
         await ctx.answerCallbackQuery(newState ? '🔔 Reminder aktif!' : '🔕 Reminder dinonaktifkan');
-        await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } });
+        try {
+          await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } });
+        } catch {
+          // ignore
+        }
         return;
       }
 
       if (data === 'reminder:change') {
         setAwaitingInput(userId, 'set_reminder');
-        await ctx.editMessageText('Ketik jam reminder baru (format HH:MM):\nContoh: `21:00` atau `08:30`', { parse_mode: 'Markdown' });
+        await safeEdit(ctx, 'Ketik jam reminder baru (format HH:MM):\nContoh: `21:00` atau `08:30`');
         await ctx.answerCallbackQuery();
         return;
       }
@@ -589,14 +719,13 @@ export function registerCallbacks(bot: Bot): void {
       // ══════════════════════════════════════════
 
       if (data === 'reset:confirm') {
-        // Delete all user data
         await supabase.from('transactions').delete().eq('user_id', userId);
         await supabase.from('savings_goals').delete().eq('user_id', userId);
         await supabase.from('reminders').delete().eq('user_id', userId);
         await supabase.from('categories').delete().eq('user_id', userId);
         await supabase.from('wallets').delete().eq('user_id', userId);
 
-        await ctx.editMessageText('✅ Semua data sudah direset.\n\nKetik apapun untuk mulai dari awal — dompet & kategori default akan dibuat otomatis.');
+        await safeEdit(ctx, '✅ Semua data sudah direset.\n\nKetik apapun untuk mulai dari awal — dompet & kategori default akan dibuat otomatis.');
         await ctx.answerCallbackQuery('Data direset!');
         return;
       }
@@ -607,7 +736,7 @@ export function registerCallbacks(bot: Bot): void {
 
       if (data === 'menu:saldo') {
         const wallets = await getAllWallets(userId);
-        await ctx.editMessageText(buildSaldoMessage(wallets));
+        await safeEdit(ctx, buildSaldoMessage(wallets));
         await ctx.answerCallbackQuery();
         return;
       }
@@ -627,7 +756,7 @@ export function registerCallbacks(bot: Bot): void {
           .text('📅 Hari', 'report:hari')
           .text('📅 Minggu', 'report:minggu')
           .text('📅 Bulan', 'report:bulan');
-        await ctx.editMessageText(lines.join('\n'), { reply_markup: kb });
+        await safeEdit(ctx, lines.join('\n'), { reply_markup: kb });
         await ctx.answerCallbackQuery();
         return;
       }
@@ -648,7 +777,7 @@ export function registerCallbacks(bot: Bot): void {
       if (data === 'menu:goals') {
         const goals = await getAllGoals(userId);
         if (goals.length === 0) {
-          await ctx.editMessageText('🎯 Belum ada savings goals.\nBuat baru: /goals tambah <nama> <target>');
+          await safeEdit(ctx, '🎯 Belum ada savings goals.\nBuat baru: /goals tambah <nama> <target>');
         } else {
           const lines = ['🎯 SAVINGS GOALS', SEP, ''];
           for (const g of goals) {
@@ -657,7 +786,7 @@ export function registerCallbacks(bot: Bot): void {
             lines.push(`   ${formatCurrency(g.current_amount)} / ${formatCurrency(g.target_amount)}`);
             lines.push('');
           }
-          await ctx.editMessageText(lines.join('\n'));
+          await safeEdit(ctx, lines.join('\n'));
         }
         await ctx.answerCallbackQuery();
         return;
@@ -686,7 +815,7 @@ export function registerCallbacks(bot: Bot): void {
           .text('📅 Bulan Ini', 'export:bulan')
           .text('📅 3 Bulan', 'export:3bulan')
           .text('📅 Semua', 'export:semua');
-        await ctx.editMessageText('📤 Export data kamu?\nPilih periode:', { reply_markup: kb });
+        await safeEdit(ctx, '📤 Export data kamu?\nPilih periode:', { reply_markup: kb });
         await ctx.answerCallbackQuery();
         return;
       }
@@ -704,7 +833,7 @@ export function registerCallbacks(bot: Bot): void {
       await ctx.answerCallbackQuery('Aksi tidak dikenali.');
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Terjadi kesalahan.';
-      await ctx.answerCallbackQuery(`❌ ${message}`);
+      await ctx.answerCallbackQuery(`❌ ${message}`).catch(() => {});
       console.error('Callback error:', err);
     }
   });
