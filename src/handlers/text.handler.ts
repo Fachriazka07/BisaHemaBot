@@ -21,6 +21,7 @@ import {
   createExpense,
   createIncome,
   createTransfer,
+  updateTransactionAmount,
   WalletNotFoundError,
 } from '../services/transaction.service';
 import {
@@ -35,7 +36,9 @@ import {
 } from '../services/category.service';
 import {
   createGoal,
-  addDeposit,
+  depositToGoal,
+  updateGoalCurrentAmount,
+  updateGoal,
 } from '../services/savings.service';
 import { upsertReminder } from '../services/reminder.service';
 import { generateReport } from '../services/report.service';
@@ -368,12 +371,55 @@ async function handleAwaitingInput(
     case 'setor_goal': {
       const amount = parseAmount(input);
       if (!amount) { await ctx.reply('❌ Nominal tidak valid.'); return; }
-      const updated = await addDeposit(data.goalId, amount);
-      const pct = Math.round((updated.current_amount / updated.target_amount) * 100);
-      const remaining = updated.target_amount - updated.current_amount;
-      await ctx.reply(
-        `✅ Setoran Berhasil!\n${SEP}\n${updated.emoji} ${updated.name}\n${formatProgressBar(updated.current_amount, updated.target_amount)}  ${pct}%\n${formatCurrency(updated.current_amount)} / ${formatCurrency(updated.target_amount)}\n\n${remaining > 0 ? `Tinggal ${formatCurrency(remaining)} lagi 💪` : '🎉 Goal tercapai!'}`
-      );
+      const walletId = data.walletId === 'none' ? undefined : data.walletId;
+      try {
+        const { goal: updated, wallet } = await depositToGoal(userId, data.goalId, amount, walletId);
+        const pct = Math.round((updated.current_amount / updated.target_amount) * 100);
+        const remaining = updated.target_amount - updated.current_amount;
+        const walletMsg = wallet ? `\n💳 Terpotong dari: ${wallet.emoji} ${wallet.name} (-${formatCurrency(amount)})` : '';
+        await ctx.reply(
+          `✅ Setoran Berhasil!\n${SEP}\n${updated.emoji} ${updated.name}\n${formatProgressBar(updated.current_amount, updated.target_amount)}  ${pct}%\n${formatCurrency(updated.current_amount)} / ${formatCurrency(updated.target_amount)}${walletMsg}\n\n${remaining > 0 ? `Tinggal ${formatCurrency(remaining)} lagi 💪` : '🎉 Goal tercapai!'}`
+        );
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Terjadi kesalahan.';
+        await ctx.reply(`❌ ${msg}`);
+      }
+      return;
+    }
+    case 'edit_target_goal': {
+      const amount = parseAmount(input);
+      if (!amount) { await ctx.reply('❌ Nominal tidak valid.'); return; }
+      const updated = await updateGoal(data.goalId, { target_amount: amount });
+      await ctx.reply(`✅ Target Goal Diperbarui!\n${updated.emoji} ${updated.name}\nTarget baru: ${formatCurrency(updated.target_amount)}`);
+      return;
+    }
+    case 'edit_current_goal': {
+      const amount = parseAmount(input);
+      if (amount === null) { await ctx.reply('❌ Nominal tidak valid.'); return; }
+      const updated = await updateGoalCurrentAmount(data.goalId, amount);
+      await ctx.reply(`✅ Saldo Terkumpul Goal Diperbarui!\n${updated.emoji} ${updated.name}\nSaldo terkumpul baru: ${formatCurrency(updated.current_amount)}`);
+      return;
+    }
+    case 'edit_name_goal': {
+      const updated = await updateGoal(data.goalId, { name: input.trim() });
+      await ctx.reply(`✅ Nama Goal Diperbarui!\n${updated.emoji} ${updated.name}`);
+      return;
+    }
+    case 'edit_emoji_goal': {
+      const updated = await updateGoal(data.goalId, { emoji: input.trim() });
+      await ctx.reply(`✅ Emoji Goal Diperbarui!\n${updated.emoji} ${updated.name}`);
+      return;
+    }
+    case 'edit_tx_amount': {
+      const amount = parseAmount(input);
+      if (!amount) { await ctx.reply('❌ Nominal tidak valid.'); return; }
+      try {
+        const tx = await updateTransactionAmount(data.txId, userId, amount);
+        await ctx.reply(`✅ Nominal Transaksi Diperbarui!\nNominal baru: ${formatCurrency(tx.amount)}\nSaldo dompet otomatis disesuaikan.`);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Terjadi kesalahan.';
+        await ctx.reply(`❌ ${msg}`);
+      }
       return;
     }
     case 'set_reminder': {

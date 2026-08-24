@@ -1,4 +1,5 @@
 import { supabase } from '../db/client';
+import type { Wallet } from '../types';
 
 // ─────────────────────────────────────────────────────────
 // SAVINGS GOALS SERVICE
@@ -39,6 +40,17 @@ export async function findGoalByName(userId: number, name: string): Promise<Savi
   return data && data.length > 0 ? (data[0] as SavingsGoal) : null;
 }
 
+export async function getGoalById(goalId: string): Promise<SavingsGoal | null> {
+  const { data, error } = await supabase
+    .from('savings_goals')
+    .select('*')
+    .eq('id', goalId)
+    .single();
+
+  if (error || !data) return null;
+  return data as SavingsGoal;
+}
+
 // CREATE
 export async function createGoal(
   userId: number,
@@ -64,19 +76,132 @@ export async function createGoal(
   return data as SavingsGoal;
 }
 
-// UPDATE — add deposit
-export async function addDeposit(goalId: string, amount: number): Promise<SavingsGoal> {
-  // Get current
+// UPDATE — Deposit with optional wallet deduction & transaction logging
+export async function depositToGoal(
+  userId: number,
+  goalId: string,
+  amount: number,
+  walletId?: string
+): Promise<{ goal: SavingsGoal; wallet?: Wallet }> {
   const { data: goal, error: e1 } = await supabase
     .from('savings_goals')
-    .select('current_amount')
+    .select('*')
     .eq('id', goalId)
     .single();
 
   if (e1 || !goal) throw new Error('Goal tidak ditemukan.');
 
-  const newAmount = Number(goal.current_amount) + amount;
+  let updatedWallet: Wallet | undefined;
 
+  if (walletId) {
+    const { data: wallet, error: e2 } = await supabase
+      .from('wallets')
+      .select('*')
+      .eq('id', walletId)
+      .single();
+
+    if (e2 || !wallet) throw new Error('Dompet tidak ditemukan.');
+
+    const newBalance = Number(wallet.balance) - amount;
+    const { data: wData, error: e3 } = await supabase
+      .from('wallets')
+      .update({ balance: newBalance })
+      .eq('id', walletId)
+      .select()
+      .single();
+
+    if (e3) throw new Error(`Gagal update saldo dompet: ${e3.message}`);
+    updatedWallet = wData as Wallet;
+
+    // Record transaction history
+    await supabase.from('transactions').insert({
+      user_id: userId,
+      wallet_id: walletId,
+      amount,
+      type: 'expense',
+      description: `Setor ke goal: ${goal.emoji} ${goal.name}`,
+    });
+  }
+
+  const newCurrentAmount = Number(goal.current_amount) + amount;
+  const { data: gData, error: e4 } = await supabase
+    .from('savings_goals')
+    .update({ current_amount: newCurrentAmount })
+    .eq('id', goalId)
+    .select()
+    .single();
+
+  if (e4) throw new Error(`Gagal update goal: ${e4.message}`);
+
+  return { goal: gData as SavingsGoal, wallet: updatedWallet };
+}
+
+// UPDATE — Withdraw from Goal back to Wallet
+export async function withdrawFromGoal(
+  userId: number,
+  goalId: string,
+  amount: number,
+  walletId?: string
+): Promise<{ goal: SavingsGoal; wallet?: Wallet }> {
+  const { data: goal, error: e1 } = await supabase
+    .from('savings_goals')
+    .select('*')
+    .eq('id', goalId)
+    .single();
+
+  if (e1 || !goal) throw new Error('Goal tidak ditemukan.');
+
+  if (Number(goal.current_amount) < amount) {
+    throw new Error(`Saldo goal (${goal.current_amount}) tidak cukup untuk ditarik ${amount}.`);
+  }
+
+  let updatedWallet: Wallet | undefined;
+
+  if (walletId) {
+    const { data: wallet, error: e2 } = await supabase
+      .from('wallets')
+      .select('*')
+      .eq('id', walletId)
+      .single();
+
+    if (e2 || !wallet) throw new Error('Dompet tidak ditemukan.');
+
+    const newBalance = Number(wallet.balance) + amount;
+    const { data: wData, error: e3 } = await supabase
+      .from('wallets')
+      .update({ balance: newBalance })
+      .eq('id', walletId)
+      .select()
+      .single();
+
+    if (e3) throw new Error(`Gagal update saldo dompet: ${e3.message}`);
+    updatedWallet = wData as Wallet;
+
+    // Record income transaction history
+    await supabase.from('transactions').insert({
+      user_id: userId,
+      wallet_id: walletId,
+      amount,
+      type: 'income',
+      description: `Tarik dari goal: ${goal.emoji} ${goal.name}`,
+    });
+  }
+
+  const newCurrentAmount = Number(goal.current_amount) - amount;
+  const { data: gData, error: e4 } = await supabase
+    .from('savings_goals')
+    .update({ current_amount: newCurrentAmount })
+    .eq('id', goalId)
+    .select()
+    .single();
+
+  if (e4) throw new Error(`Gagal update goal: ${e4.message}`);
+
+  return { goal: gData as SavingsGoal, wallet: updatedWallet };
+}
+
+// UPDATE — Set current_amount directly (fix mistyped deposit)
+export async function updateGoalCurrentAmount(goalId: string, newAmount: number): Promise<SavingsGoal> {
   const { data, error } = await supabase
     .from('savings_goals')
     .update({ current_amount: newAmount })
@@ -84,14 +209,14 @@ export async function addDeposit(goalId: string, amount: number): Promise<Saving
     .select()
     .single();
 
-  if (error) throw new Error(`addDeposit: ${error.message}`);
+  if (error) throw new Error(`updateGoalCurrentAmount: ${error.message}`);
   return data as SavingsGoal;
 }
 
 // UPDATE — general
 export async function updateGoal(
   goalId: string,
-  updates: Partial<Pick<SavingsGoal, 'name' | 'target_amount' | 'deadline' | 'emoji'>>
+  updates: Partial<Pick<SavingsGoal, 'name' | 'target_amount' | 'current_amount' | 'deadline' | 'emoji'>>
 ): Promise<SavingsGoal> {
   const { data, error } = await supabase
     .from('savings_goals')

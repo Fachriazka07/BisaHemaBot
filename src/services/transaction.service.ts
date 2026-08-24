@@ -219,6 +219,58 @@ export async function softDeleteTransaction(
 }
 
 // ─────────────────────────────────────────────────────────
+// UPDATE — Transaction Amount
+// ─────────────────────────────────────────────────────────
+
+export async function updateTransactionAmount(
+  transactionId: string,
+  userId: number,
+  newAmount: number
+): Promise<Transaction> {
+  const tx = await getTransactionById(transactionId);
+  if (!tx || tx.user_id !== userId) throw new Error('Transaksi tidak ditemukan.');
+  if (tx.is_deleted) throw new Error('Transaksi sudah dihapus.');
+
+  const diff = newAmount - tx.amount;
+
+  const { data: wallet } = await supabase
+    .from('wallets')
+    .select('*')
+    .eq('id', tx.wallet_id)
+    .single();
+
+  if (wallet) {
+    let newBalance = wallet.balance as number;
+    if (tx.type === 'expense') newBalance -= diff;
+    else if (tx.type === 'income') newBalance += diff;
+    else if (tx.type === 'transfer') {
+      newBalance -= diff;
+      if (tx.to_wallet_id) {
+        const { data: toW } = await supabase
+          .from('wallets')
+          .select('balance')
+          .eq('id', tx.to_wallet_id)
+          .single();
+        if (toW) {
+          await updateWalletBalance(tx.to_wallet_id, (toW.balance as number) + diff);
+        }
+      }
+    }
+    await updateWalletBalance(tx.wallet_id, newBalance);
+  }
+
+  const { data, error } = await supabase
+    .from('transactions')
+    .update({ amount: newAmount })
+    .eq('id', transactionId)
+    .select()
+    .single();
+
+  if (error) throw new Error(`updateTransactionAmount: ${error.message}`);
+  return data as Transaction;
+}
+
+// ─────────────────────────────────────────────────────────
 // Custom error untuk wallet not found (bisa dicatch khusus)
 // ─────────────────────────────────────────────────────────
 

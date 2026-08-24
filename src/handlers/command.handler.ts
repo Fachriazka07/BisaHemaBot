@@ -38,7 +38,9 @@ import {
   getAllGoals,
   findGoalByName,
   createGoal,
-  addDeposit,
+  depositToGoal,
+  withdrawFromGoal,
+  updateGoalCurrentAmount,
   updateGoal,
 } from '../services/savings.service';
 import { getExpensePieChartUrl } from '../services/chart.service';
@@ -495,6 +497,7 @@ export function registerCommands(bot: Bot): void {
   });
 
   // ── /goals [tambah|setor|edit|hapus] ─────────
+  // ── /goals [tambah|setor|tarik|edit|hapus] ─────────
   bot.command('goals', async (ctx) => {
     if (!ctx.from) return;
     const args = ctx.match?.trim().split(/\s+/) ?? [];
@@ -526,7 +529,9 @@ export function registerCommands(bot: Bot): void {
 
       const kb = new InlineKeyboard()
         .text('➕ Goals Baru', 'goals:tambah_prompt')
-        .text('💰 Setor', 'goals:setor_prompt');
+        .text('💰 Setor', 'goals:setor_prompt')
+        .row()
+        .text('✏️ Edit Goal', 'goals:edit_menu');
       await ctx.reply(lines.join('\n'), { reply_markup: kb });
       return;
     }
@@ -549,8 +554,9 @@ export function registerCommands(bot: Bot): void {
     if (sub === 'setor') {
       const goalName = args[1];
       const amountStr = args[2];
+      const walletName = args[3];
       if (!goalName || !amountStr) {
-        await ctx.reply('Gunakan: /goals setor <nama> <nominal>\nContoh: /goals setor laptop 200rb');
+        await ctx.reply('Gunakan: /goals setor <nama> <nominal> [dompet]\nContoh: /goals setor laptop 200rb bca');
         return;
       }
       const amount = parseAmount(amountStr);
@@ -559,14 +565,77 @@ export function registerCommands(bot: Bot): void {
       const goal = await findGoalByName(ctx.from.id, goalName);
       if (!goal) { await ctx.reply(`❌ Goal "${goalName}" tidak ditemukan.`); return; }
 
-      const updated = await addDeposit(goal.id, amount);
+      // Resolve wallet if provided
+      let walletId: string | undefined;
+      let walletObj: Wallet | null = null;
+      if (walletName) {
+        walletObj = await findWalletByName(ctx.from.id, walletName);
+        if (!walletObj) { await ctx.reply(`❌ Dompet "${walletName}" tidak ditemukan.`); return; }
+        walletId = walletObj.id;
+      } else {
+        const wallets = await getAllWallets(ctx.from.id);
+        if (wallets.length > 1) {
+          const kb = new InlineKeyboard();
+          wallets.forEach((w) => {
+            kb.text(`${w.emoji} ${w.name}`, `goals:setor_w:${goal.id}:${amount}:${w.id}`);
+          });
+          kb.row().text('🚫 Tanpa Dompet', `goals:setor_w:${goal.id}:${amount}:none`);
+          kb.row().text('Batal', 'cancel_action');
+          await ctx.reply(`Pilih dompet yang dipotong untuk setor ke ${goal.emoji} ${goal.name}:`, { reply_markup: kb });
+          return;
+        } else if (wallets.length === 1 && wallets[0]) {
+          walletId = wallets[0].id;
+          walletObj = wallets[0];
+        }
+      }
+
+      const { goal: updated, wallet } = await depositToGoal(ctx.from.id, goal.id, amount, walletId);
       const pct = Math.round((updated.current_amount / updated.target_amount) * 100);
       const remaining = updated.target_amount - updated.current_amount;
       const bar = formatProgressBar(updated.current_amount, updated.target_amount);
 
+      const walletMsg = wallet ? `\n💳 Terpotong dari: ${wallet.emoji} ${wallet.name} (-${formatCurrency(amount)})` : '';
+
       await ctx.reply(
-        `✅ Setoran Berhasil!\n${SEP}\n${updated.emoji} ${updated.name}\n${bar}  ${pct}%\n${formatCurrency(updated.current_amount)} / ${formatCurrency(updated.target_amount)}\n\n${remaining > 0 ? `Tinggal ${formatCurrency(remaining)} lagi 💪` : '🎉 Goal tercapai!'}`
+        `✅ Setoran Berhasil!\n${SEP}\n${updated.emoji} ${updated.name}\n${bar}  ${pct}%\n${formatCurrency(updated.current_amount)} / ${formatCurrency(updated.target_amount)}${walletMsg}\n\n${remaining > 0 ? `Tinggal ${formatCurrency(remaining)} lagi 💪` : '🎉 Goal tercapai!'}`
       );
+      return;
+    }
+
+    if (sub === 'tarik') {
+      const goalName = args[1];
+      const amountStr = args[2];
+      const walletName = args[3];
+      if (!goalName || !amountStr) {
+        await ctx.reply('Gunakan: /goals tarik <nama> <nominal> [dompet]\nContoh: /goals tarik laptop 200rb bca');
+        return;
+      }
+      const amount = parseAmount(amountStr);
+      if (!amount) { await ctx.reply('❌ Nominal tidak valid.'); return; }
+
+      const goal = await findGoalByName(ctx.from.id, goalName);
+      if (!goal) { await ctx.reply(`❌ Goal "${goalName}" tidak ditemukan.`); return; }
+
+      let walletId: string | undefined;
+      if (walletName) {
+        const walletObj = await findWalletByName(ctx.from.id, walletName);
+        if (!walletObj) { await ctx.reply(`❌ Dompet "${walletName}" tidak ditemukan.`); return; }
+        walletId = walletObj.id;
+      }
+
+      try {
+        const { goal: updated, wallet } = await withdrawFromGoal(ctx.from.id, goal.id, amount, walletId);
+        const pct = Math.round((updated.current_amount / updated.target_amount) * 100);
+        const bar = formatProgressBar(updated.current_amount, updated.target_amount);
+        const walletMsg = wallet ? `\n💳 Masuk ke dompet: ${wallet.emoji} ${wallet.name} (+${formatCurrency(amount)})` : '';
+
+        await ctx.reply(
+          `✅ Penarikan Goal Berhasil!\n${SEP}\n${updated.emoji} ${updated.name}\n${bar}  ${pct}%\n${formatCurrency(updated.current_amount)} / ${formatCurrency(updated.target_amount)}${walletMsg}`
+        );
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Terjadi kesalahan.';
+        await ctx.reply(`❌ ${msg}`);
+      }
       return;
     }
 
@@ -575,7 +644,7 @@ export function registerCommands(bot: Bot): void {
       const field = args[2]?.toLowerCase();
       const value = args.slice(3).join(' ');
       if (!goalName || !field || !value) {
-        await ctx.reply('Gunakan:\n/goals edit <nama> target <nominal>\n/goals edit <nama> deadline <tanggal>');
+        await ctx.reply('Gunakan:\n/goals edit <nama> target <nominal>\n/goals edit <nama> terkumpul <nominal>\n/goals edit <nama> deadline <tanggal>');
         return;
       }
 
@@ -587,6 +656,12 @@ export function registerCommands(bot: Bot): void {
         if (!amount) { await ctx.reply('❌ Nominal tidak valid.'); return; }
         const updated = await updateGoal(goal.id, { target_amount: amount });
         await ctx.reply(`✅ Target Diperbarui!\n${updated.emoji} ${updated.name}\nTarget baru: ${formatCurrency(updated.target_amount)}`);
+      } else if (field === 'terkumpul' || field === 'setor' || field === 'saldo' || field === 'current') {
+        const amount = parseAmount(value);
+        if (amount === null) { await ctx.reply('❌ Nominal tidak valid.'); return; }
+        const oldVal = goal.current_amount;
+        const updated = await updateGoalCurrentAmount(goal.id, amount);
+        await ctx.reply(`✅ Saldo Terkumpul Diperbarui!\n${SEP}\n${updated.emoji} ${updated.name}\nSebelumnya: ${formatCurrency(oldVal)}\nSekarang: ${formatCurrency(updated.current_amount)}`);
       } else if (field === 'deadline') {
         await updateGoal(goal.id, { deadline: value });
         await ctx.reply(`✅ Deadline Diperbarui!\n${goal.emoji} ${goal.name}\nDeadline baru: ${value}`);
@@ -594,7 +669,7 @@ export function registerCommands(bot: Bot): void {
         await updateGoal(goal.id, { name: value });
         await ctx.reply(`✅ Nama Diperbarui!\n${goal.emoji} ${goal.name}  →  ${value}`);
       } else {
-        await ctx.reply('Field tidak dikenali. Gunakan: target, deadline, atau nama');
+        await ctx.reply('Field tidak dikenali. Gunakan: target, terkumpul, deadline, atau nama');
       }
       return;
     }
@@ -609,13 +684,13 @@ export function registerCommands(bot: Bot): void {
         .text('✅ Ya, Hapus', `delete_goal:${goal.id}`)
         .text('❌ Batal', 'cancel_action');
       await ctx.reply(
-        `🗑️ Hapus goal ${goal.emoji} ${goal.name}?\nTerkumpul: ${formatCurrency(goal.current_amount)}\n\n⚠️ Uang yang sudah disetor tidak kembali ke dompet.`,
+        `🗑️ Hapus goal ${goal.emoji} ${goal.name}?\nTerkumpul: ${formatCurrency(goal.current_amount)}\n\n⚠️ Uang yang sudah disetor tidak otomatis kembali ke dompet (tarik dulu jika mau kembali).`,
         { reply_markup: kb }
       );
       return;
     }
 
-    await ctx.reply('Subcommand tidak dikenali.\nGunakan: /goals [tambah|setor|edit|hapus]');
+    await ctx.reply('Subcommand tidak dikenali.\nGunakan: /goals [tambah|setor|tarik|edit|hapus]');
   });
 
   // ── /reminder ────────────────────────────────

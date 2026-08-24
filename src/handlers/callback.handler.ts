@@ -12,7 +12,12 @@ import {
   getAllCategories,
   deleteCategory,
 } from '../services/category.service';
-import { deleteGoal, getAllGoals } from '../services/savings.service';
+import {
+  deleteGoal,
+  getAllGoals,
+  getGoalById,
+  depositToGoal,
+} from '../services/savings.service';
 import { generateReport, exportTransactionsCSV } from '../services/report.service';
 import { getExpensePieChartUrl } from '../services/chart.service';
 import { toggleReminder, getReminder } from '../services/reminder.service';
@@ -352,8 +357,125 @@ export function registerCallbacks(bot: Bot): void {
 
       if (data.startsWith('goals:setor_pick:')) {
         const goalId = data.replace('goals:setor_pick:', '');
-        setAwaitingInput(userId, 'setor_goal', { goalId });
+        const goal = await getGoalById(goalId);
+        const wallets = await getAllWallets(userId);
+
+        const kb = new InlineKeyboard();
+        wallets.forEach((w) => {
+          kb.text(`${w.emoji} ${w.name}`, `goals:setor_wallet:${goalId}:${w.id}`);
+        });
+        kb.row().text('🚫 Tanpa Dompet', `goals:setor_wallet:${goalId}:none`);
+        kb.row().text('Batal', 'cancel_action');
+
+        await ctx.editMessageText(
+          `Pilih dompet yang dipotong untuk setor ke ${goal?.emoji ?? '🎯'} ${goal?.name ?? 'goal'}:`,
+          { reply_markup: kb }
+        );
+        await ctx.answerCallbackQuery();
+        return;
+      }
+
+      if (data.startsWith('goals:setor_wallet:')) {
+        const parts = data.replace('goals:setor_wallet:', '').split(':');
+        const goalId = parts[0]!;
+        const walletId = parts[1]!;
+        setAwaitingInput(userId, 'setor_goal', { goalId, walletId });
         await ctx.editMessageText('Masukkan nominal setoran:');
+        await ctx.answerCallbackQuery();
+        return;
+      }
+
+      if (data.startsWith('goals:setor_w:')) {
+        const parts = data.replace('goals:setor_w:', '').split(':');
+        const goalId = parts[0]!;
+        const amount = parseFloat(parts[1]!);
+        const walletId = parts[2] === 'none' ? undefined : parts[2];
+
+        try {
+          const { goal: updated, wallet } = await depositToGoal(userId, goalId, amount, walletId);
+          const pct = Math.round((updated.current_amount / updated.target_amount) * 100);
+          const remaining = updated.target_amount - updated.current_amount;
+          const bar = formatProgressBar(updated.current_amount, updated.target_amount);
+          const walletMsg = wallet ? `\n💳 Terpotong dari: ${wallet.emoji} ${wallet.name} (-${formatCurrency(amount)})` : '';
+
+          await ctx.editMessageText(
+            `✅ Setoran Berhasil!\n${SEP}\n${updated.emoji} ${updated.name}\n${bar}  ${pct}%\n${formatCurrency(updated.current_amount)} / ${formatCurrency(updated.target_amount)}${walletMsg}\n\n${remaining > 0 ? `Tinggal ${formatCurrency(remaining)} lagi 💪` : '🎉 Goal tercapai!'}`
+          );
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : 'Terjadi kesalahan.';
+          await ctx.editMessageText(`❌ ${msg}`);
+        }
+        await ctx.answerCallbackQuery();
+        return;
+      }
+
+      if (data === 'goals:edit_menu') {
+        const goals = await getAllGoals(userId);
+        if (goals.length === 0) {
+          await ctx.answerCallbackQuery('Belum ada goal.');
+          return;
+        }
+        const kb = new InlineKeyboard();
+        goals.forEach((g) => {
+          kb.text(`${g.emoji} ${g.name}`, `goals:edit_pick:${g.id}`);
+        });
+        kb.row().text('Batal', 'cancel_action');
+        await ctx.editMessageText('Pilih goal yang ingin diedit:', { reply_markup: kb });
+        await ctx.answerCallbackQuery();
+        return;
+      }
+
+      if (data.startsWith('goals:edit_pick:')) {
+        const goalId = data.replace('goals:edit_pick:', '');
+        const goal = await getGoalById(goalId);
+        if (!goal) { await ctx.answerCallbackQuery('❌ Goal tidak ditemukan.'); return; }
+
+        const kb = new InlineKeyboard()
+          .text('🎯 Target', `goals:edit_target_prompt:${goalId}`)
+          .text('💰 Terkumpul', `goals:edit_current_prompt:${goalId}`)
+          .row()
+          .text('✏️ Rename', `goals:edit_name_prompt:${goalId}`)
+          .text('🎨 Emoji', `goals:edit_emoji_prompt:${goalId}`)
+          .row()
+          .text('🗑️ Hapus', `delete_goal:${goalId}`)
+          .text('← Kembali', 'goals:edit_menu');
+
+        await ctx.editMessageText(
+          `Edit goal ${goal.emoji} ${goal.name}:\n🎯 Target: ${formatCurrency(goal.target_amount)}\n💰 Terkumpul: ${formatCurrency(goal.current_amount)}`,
+          { reply_markup: kb }
+        );
+        await ctx.answerCallbackQuery();
+        return;
+      }
+
+      if (data.startsWith('goals:edit_target_prompt:')) {
+        const goalId = data.replace('goals:edit_target_prompt:', '');
+        setAwaitingInput(userId, 'edit_target_goal', { goalId });
+        await ctx.editMessageText('Masukkan nominal target baru:');
+        await ctx.answerCallbackQuery();
+        return;
+      }
+
+      if (data.startsWith('goals:edit_current_prompt:')) {
+        const goalId = data.replace('goals:edit_current_prompt:', '');
+        setAwaitingInput(userId, 'edit_current_goal', { goalId });
+        await ctx.editMessageText('Masukkan nominal saldo terkumpul baru:');
+        await ctx.answerCallbackQuery();
+        return;
+      }
+
+      if (data.startsWith('goals:edit_name_prompt:')) {
+        const goalId = data.replace('goals:edit_name_prompt:', '');
+        setAwaitingInput(userId, 'edit_name_goal', { goalId });
+        await ctx.editMessageText('Ketik nama baru untuk goal ini:');
+        await ctx.answerCallbackQuery();
+        return;
+      }
+
+      if (data.startsWith('goals:edit_emoji_prompt:')) {
+        const goalId = data.replace('goals:edit_emoji_prompt:', '');
+        setAwaitingInput(userId, 'edit_emoji_goal', { goalId });
+        await ctx.editMessageText('Kirim emoji baru untuk goal ini:');
         await ctx.answerCallbackQuery();
         return;
       }
@@ -368,12 +490,22 @@ export function registerCallbacks(bot: Bot): void {
         if (!tx) { await ctx.answerCallbackQuery('Transaksi tidak ditemukan.'); return; }
 
         const kb = new InlineKeyboard()
+          .text('💰 Edit Nominal', `edit_tx_amount:${txId}`)
           .text('🗑️ Hapus', `confirm_delete:${txId}`)
+          .row()
           .text('Batal', 'cancel_action');
         await ctx.editMessageText(
-          `Transaksi: ${formatCurrency(tx.amount)} (${tx.type})\n🕐 ${formatDateTime(tx.created_at)}\n\nPilih aksi:`,
+          `Transaksi: ${formatCurrency(tx.amount)} (${tx.type})\n🕐 ${formatDateTime(tx.created_at)}\n${tx.description ? `📝 ${tx.description}\n` : ''}\nPilih aksi:`,
           { reply_markup: kb }
         );
+        await ctx.answerCallbackQuery();
+        return;
+      }
+
+      if (data.startsWith('edit_tx_amount:')) {
+        const txId = data.replace('edit_tx_amount:', '');
+        setAwaitingInput(userId, 'edit_tx_amount', { txId });
+        await ctx.editMessageText('Masukkan nominal transaksi baru:');
         await ctx.answerCallbackQuery();
         return;
       }
