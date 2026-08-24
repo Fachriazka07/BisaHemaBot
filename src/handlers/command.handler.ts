@@ -49,7 +49,7 @@ import {
   upsertReminder,
   toggleReminder,
 } from '../services/reminder.service';
-import type { Category, Wallet } from '../types';
+import type { Category, Wallet, CategoryType } from '../types';
 
 
 const SEP = '━━━━━━━━━━━━━━━━━━━━';
@@ -359,14 +359,30 @@ export function registerCommands(bot: Bot): void {
     }
 
     if (sub === 'tambah') {
-      const name = args[1];
-      const type = args[2]?.toLowerCase();
-      if (!name || !type || (type !== 'expense' && type !== 'income')) {
-        await ctx.reply('Gunakan: /kategori tambah <nama> <expense|income>\nContoh: /kategori tambah hiburan expense');
+      const rest = args.slice(1);
+      if (rest.length === 0) {
+        await ctx.reply('Gunakan: /kategori tambah <nama> [expense|income]\nContoh: /kategori tambah 🍜 ramen expense\natau: /kategori tambah bensin');
         return;
       }
-      const cat = await createCategory(ctx.from.id, name, type);
-      await ctx.reply(`✅ Kategori Ditambahkan!\n${cat.emoji} ${cat.name}  •  ${cat.type}`);
+
+      let type: CategoryType = 'expense';
+      const lastArg = rest[rest.length - 1]?.toLowerCase();
+      if (lastArg === 'income' || lastArg === 'pemasukan') {
+        type = 'income';
+        rest.pop();
+      } else if (lastArg === 'expense' || lastArg === 'pengeluaran') {
+        type = 'expense';
+        rest.pop();
+      }
+
+      const rawName = rest.join(' ');
+      if (!rawName) {
+        await ctx.reply('❌ Nama kategori tidak boleh kosong.');
+        return;
+      }
+
+      const cat = await createCategory(ctx.from.id, rawName, type);
+      await ctx.reply(`✅ Kategori Ditambahkan!\n${cat.emoji} ${cat.name}  •  ${cat.type === 'expense' ? 'Pengeluaran' : 'Pemasukan'}`);
       return;
     }
 
@@ -415,15 +431,27 @@ export function registerCommands(bot: Bot): void {
   // Alias: /tambah_kategori
   bot.command('tambah_kategori', async (ctx) => {
     if (!ctx.from) return;
-    const args = ctx.match?.trim().split(/\s+/) ?? [];
-    const name = args[0];
-    const type = args[1]?.toLowerCase();
-    if (!name || !type || (type !== 'expense' && type !== 'income')) {
-      await ctx.reply('Gunakan: /tambah_kategori <nama> <expense|income>');
+    const rest = ctx.match?.trim().split(/\s+/) ?? [];
+    if (rest.length === 0 || !rest[0]) {
+      await ctx.reply('Gunakan: /tambah_kategori <nama> [expense|income]\nContoh: /tambah_kategori 🍜 ramen');
       return;
     }
-    const cat = await createCategory(ctx.from.id, name, type);
-    await ctx.reply(`✅ Kategori Ditambahkan!\n${cat.emoji} ${cat.name}  •  ${cat.type}`);
+
+    let type: CategoryType = 'expense';
+    const lastArg = rest[rest.length - 1]?.toLowerCase();
+    if (lastArg === 'income' || lastArg === 'pemasukan') {
+      type = 'income';
+      rest.pop();
+    } else if (lastArg === 'expense' || lastArg === 'pengeluaran') {
+      type = 'expense';
+      rest.pop();
+    }
+
+    const rawName = rest.join(' ');
+    if (!rawName) { await ctx.reply('❌ Nama kategori tidak boleh kosong.'); return; }
+
+    const cat = await createCategory(ctx.from.id, rawName, type);
+    await ctx.reply(`✅ Kategori Ditambahkan!\n${cat.emoji} ${cat.name}  •  ${cat.type === 'expense' ? 'Pengeluaran' : 'Pemasukan'}`);
   });
 
   // ── /budget [status|set|hapus] ───────────────
