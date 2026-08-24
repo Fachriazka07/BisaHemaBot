@@ -99,7 +99,8 @@ export async function createTransfer(
   userId: number,
   fromWalletName: string,
   toWalletName: string,
-  amount: number
+  amount: number,
+  description?: string
 ): Promise<TransactionResult> {
   const fromWallet = await findWalletByName(userId, fromWalletName);
   if (!fromWallet) throw new WalletNotFoundError(fromWalletName);
@@ -119,6 +120,7 @@ export async function createTransfer(
       to_wallet_id: toWallet.id,
       amount,
       type: 'transfer',
+      description: description ?? null,
     })
     .select()
     .single();

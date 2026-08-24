@@ -116,14 +116,21 @@ export function buildTransferConfirm(opts: {
   amount: number;
   fromWallet: Wallet;
   toWallet: Wallet;
+  description?: string;
 }): string {
-  return [
+  const lines = [
     `⚡ *Transfer Berhasil!*`,
     SEP,
     `💸 *Dari*    : ${opts.fromWallet.emoji} ${opts.fromWallet.name} (Sisa: ${formatCurrency(opts.fromWallet.balance)})`,
     `📥 *Ke*      : ${opts.toWallet.emoji} ${opts.toWallet.name} (Total: ${formatCurrency(opts.toWallet.balance)})`,
     `💰 *Jumlah*  : *${formatCurrency(opts.amount)}*`,
-  ].join('\n');
+  ];
+
+  if (opts.description) {
+    lines.push(`📝 *Catatan* : ${opts.description}`);
+  }
+
+  return lines.join('\n');
 }
 
 /** Tampilkan semua saldo dompet */

@@ -144,13 +144,15 @@ export async function handleTextInput(ctx: Context): Promise<void> {
         userId,
         parsed.walletName,
         parsed.toWalletName,
-        parsed.amount
+        parsed.amount,
+        parsed.description
       );
 
       const msg = buildTransferConfirm({
         amount: parsed.amount,
         fromWallet: result.wallet,
         toWallet: result.toWallet!,
+        description: parsed.description,
       });
 
       await ctx.reply(msg, {

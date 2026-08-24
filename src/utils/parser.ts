@@ -8,9 +8,8 @@ import type { ParsedInput } from '../types';
 //   30rb / 30ribu  → 30_000
 //   30k            → 30_000
 //   3jt / 3juta    → 3_000_000
-//   1.5jt          → 1_500_000
-//   1,5jt          → 1_500_000
-//   30.000         → 30_000   (titik = pemisah ribuan)
+//   1.5jt / 1,5jt  → 1_500_000
+//   30.000         → 30_000
 //   1.500.000      → 1_500_000
 //   30000          → 30_000
 // ─────────────────────────────────────────────────────────
@@ -53,7 +52,6 @@ export function parseAmount(raw: string): number | null {
       // Titik diikuti tepat 3 digit = pemisah ribuan (30.000)
       str = str.replace('.', '');
     }
-    // else: desimal (1.5) → biarkan
   }
 
   const num = parseFloat(str);
@@ -63,24 +61,15 @@ export function parseAmount(raw: string): number | null {
 }
 
 // ─────────────────────────────────────────────────────────
-// TEXT INPUT PARSER
-// Parse quick text input dari user → ParsedInput
-//
-// Patterns:
-//   keluar/pengeluaran <kategori> <nominal> <dompet> [deskripsi]
-//   masuk/pemasukan    <sumber>   <nominal> <dompet> [deskripsi]
-//   transfer <nominal> dari <dompetA> ke <dompetB>
+// FLEXIBLE TEXT INPUT PARSER
 // ─────────────────────────────────────────────────────────
-
-const EXPENSE_RE = /^(?:keluar|pengeluaran)\s+(\S+)\s+(\S+)\s+(\S+)(?:\s+(.+))?$/i;
-const INCOME_RE = /^(?:masuk|pemasukan)\s+(\S+)\s+(\S+)\s+(\S+)(?:\s+(.+))?$/i;
-const TRANSFER_RE = /^transfer\s+(\S+)\s+dari\s+(\S+)\s+ke\s+(\S+)$/i;
 
 export function parseTextInput(text: string): ParsedInput | null {
   const trimmed = text.trim();
 
-  // --- TRANSFER ---
-  const transferMatch = TRANSFER_RE.exec(trimmed);
+  // 1. TRANSFER WITH OPTIONAL DESCRIPTION
+  // Format: transfer <nominal> dari <dompetA> ke <dompetB> [keterangan...]
+  const transferMatch = /^transfer\s+(\S+)\s+dari\s+(\S+)\s+ke\s+(\S+)(?:\s+(.+))?$/i.exec(trimmed);
   if (transferMatch) {
     const amount = parseAmount(transferMatch[1] ?? '');
     if (!amount) return null;
@@ -89,36 +78,77 @@ export function parseTextInput(text: string): ParsedInput | null {
       amount,
       walletName: (transferMatch[2] ?? '').toLowerCase(),
       toWalletName: (transferMatch[3] ?? '').toLowerCase(),
+      description: transferMatch[4]?.trim() || undefined,
     };
   }
 
-  // --- EXPENSE ---
-  const expenseMatch = EXPENSE_RE.exec(trimmed);
-  if (expenseMatch) {
-    const amount = parseAmount(expenseMatch[2] ?? '');
-    if (!amount) return null;
-    return {
-      type: 'expense',
-      categoryName: (expenseMatch[1] ?? '').toLowerCase(),
-      amount,
-      walletName: (expenseMatch[3] ?? '').toLowerCase(),
-      description: expenseMatch[4]?.trim(),
-    };
+  // 2. EXPENSE & INCOME WITH PREFIX
+  const expensePrefixMatch = /^(?:keluar|pengeluaran|bayar|beli)\s+(.+)$/i.exec(trimmed);
+  const incomePrefixMatch = /^(?:masuk|pemasukan|dapat|terima)\s+(.+)$/i.exec(trimmed);
+
+  if (expensePrefixMatch) {
+    const tokens = expensePrefixMatch[1]!.trim().split(/\s+/);
+    return parseFlexTransaction('expense', tokens);
   }
 
-  // --- INCOME ---
-  const incomeMatch = INCOME_RE.exec(trimmed);
-  if (incomeMatch) {
-    const amount = parseAmount(incomeMatch[2] ?? '');
-    if (!amount) return null;
-    return {
-      type: 'income',
-      categoryName: (incomeMatch[1] ?? '').toLowerCase(),
-      amount,
-      walletName: (incomeMatch[3] ?? '').toLowerCase(),
-      description: incomeMatch[4]?.trim(),
-    };
+  if (incomePrefixMatch) {
+    const tokens = incomePrefixMatch[1]!.trim().split(/\s+/);
+    return parseFlexTransaction('income', tokens);
+  }
+
+  // 3. FALLBACK WITHOUT PREFIX (misal: "30rb makan cash dipinjam" atau "makan 30rb cash dipinjam")
+  const tokens = trimmed.split(/\s+/);
+  if (tokens.length >= 3) {
+    const parsedAsExpense = parseFlexTransaction('expense', tokens);
+    if (parsedAsExpense) return parsedAsExpense;
   }
 
   return null;
+}
+
+function parseFlexTransaction(type: 'expense' | 'income', tokens: string[]): ParsedInput | null {
+  if (tokens.length < 2) return null;
+
+  let amountIndex = -1;
+  let amountValue = 0;
+
+  // Cari token mana yang merupakan nominal valid
+  for (let i = 0; i < tokens.length; i++) {
+    const parsed = parseAmount(tokens[i]!);
+    if (parsed !== null && parsed > 0) {
+      amountIndex = i;
+      amountValue = parsed;
+      break;
+    }
+  }
+
+  if (amountIndex === -1) return null;
+
+  // Hapus token nominal dari daftar token
+  const remaining = tokens.filter((_, idx) => idx !== amountIndex);
+  if (remaining.length === 0) return null;
+
+  // Jika cuma ada 1 sisa token: jadikan category, wallet default ke 'cash'
+  if (remaining.length === 1) {
+    return {
+      type,
+      categoryName: remaining[0]!.toLowerCase(),
+      amount: amountValue,
+      walletName: 'cash',
+    };
+  }
+
+  // Jika ada >= 2 sisa token:
+  // Token 0 = categoryName, Token 1 = walletName, sisanya = description!
+  const categoryName = remaining[0]!.toLowerCase();
+  const walletName = remaining[1]!.toLowerCase();
+  const description = remaining.slice(2).join(' ').trim();
+
+  return {
+    type,
+    categoryName,
+    amount: amountValue,
+    walletName,
+    description: description || undefined,
+  };
 }
