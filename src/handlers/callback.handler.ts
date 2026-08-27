@@ -27,6 +27,8 @@ import {
 import { generateReport, exportTransactionsCSV } from '../services/report.service';
 import { getExpensePieChartUrl } from '../services/chart.service';
 import { toggleReminder, getReminder } from '../services/reminder.service';
+import { getTopPresets } from '../services/preset.service';
+import { buildDashboard } from '../services/dashboard.service';
 import { supabase } from '../db/client';
 import {
   formatCurrency,
@@ -35,7 +37,7 @@ import {
   formatDateTime,
   buildReportMessage,
 } from '../utils/formatter';
-import { afterTransactionKeyboard, reportKeyboard } from '../utils/keyboard';
+import { afterTransactionKeyboard, reportKeyboard, buildHomeKeyboard } from '../utils/keyboard';
 
 const SEP = '━━━━━━━━━━━━━━━━━━━━';
 
@@ -678,6 +680,41 @@ export function registerCallbacks(bot: Bot): void {
       }
 
       // ══════════════════════════════════════════
+      // ██ QUICK SHORTCUT PRESET
+      // ══════════════════════════════════════════
+
+      if (data.startsWith('preset:')) {
+        const parts = data.replace('preset:', '').split(':');
+        const walletName = parts[0]!;
+        const categoryName = parts[1]!;
+        const amount = parseFloat(parts[2] ?? '0');
+
+        try {
+          const result = await createExpense(userId, walletName, categoryName, amount);
+          const catDisplay = result.category ? `${result.category.emoji} ${result.category.name}` : categoryName;
+          await ctx.answerCallbackQuery({
+            text: `✅ Catat: ${catDisplay} ${formatCurrency(amount)} (${result.wallet.name})`,
+            show_alert: false,
+          });
+
+          // Refresh dashboard dynamically
+          const [dashboard, presets] = await Promise.all([
+            buildDashboard(userId),
+            getTopPresets(userId, 4),
+          ]);
+          const kb = buildHomeKeyboard(presets);
+          await safeEdit(ctx, dashboard, { parse_mode: 'Markdown', reply_markup: kb });
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : 'Terjadi kesalahan saat memproses preset.';
+          await ctx.answerCallbackQuery({
+            text: `❌ ${msg}`,
+            show_alert: true,
+          });
+        }
+        return;
+      }
+
+      // ══════════════════════════════════════════
       // ██ REPORT PERIOD & CUSTOM DATE
       // ══════════════════════════════════════════
 
@@ -784,20 +821,8 @@ export function registerCallbacks(bot: Bot): void {
 
       if (data === 'menu:laporan') {
         const report = await generateReport(userId, 'bulan');
-        const lines = [
-          `📊 LAPORAN ${report.period}`,
-          SEP,
-          `💚 Pemasukan      ${formatCurrency(report.totalIncome)}`,
-          `❤️ Pengeluaran    ${formatCurrency(report.totalExpense)}`,
-          `─────────────────────`,
-          `💰 Selisih       ${report.balance >= 0 ? '+' : ''}${formatCurrency(report.balance)}`,
-        ];
-
-        const kb = new InlineKeyboard()
-          .text('📅 Hari', 'report:hari')
-          .text('📅 Minggu', 'report:minggu')
-          .text('📅 Bulan', 'report:bulan');
-        await safeEdit(ctx, lines.join('\n'), { reply_markup: kb });
+        const msg = buildReportMessage(report);
+        await safeEdit(ctx, msg, { reply_markup: reportKeyboard(), parse_mode: 'Markdown' });
         await ctx.answerCallbackQuery();
         return;
       }

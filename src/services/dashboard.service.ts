@@ -11,6 +11,8 @@ import {
 } from '../utils/formatter';
 
 
+import { getTopPresets } from './preset.service';
+
 const SEP = '━━━━━━━━━━━━━━━━━━━━';
 const SEP_THIN = '─────────────────────';
 
@@ -19,13 +21,14 @@ const SEP_THIN = '────────────────────�
  */
 export async function buildDashboard(userId: number): Promise<string> {
   // Fetch all data in parallel
-  const [wallets, todayReport, monthReport, budgets, goals, recent] = await Promise.all([
+  const [wallets, todayReport, monthReport, budgets, goals, recent, presets] = await Promise.all([
     getAllWallets(userId),
     generateReport(userId, 'hari'),
     generateReport(userId, 'bulan'),
     getBudgetStatus(userId),
     getAllGoals(userId),
     getRecentTransactions(userId, 5),
+    getTopPresets(userId, 4),
   ]);
 
   const lines: string[] = [];
@@ -51,6 +54,16 @@ export async function buildDashboard(userId: number): Promise<string> {
     lines.push(`  ${w.emoji} ${w.name.padEnd(12)} ${formatCurrency(w.balance)}`);
   }
   lines.push(`  💰 *Total*        ${formatCurrency(totalBalance)}`);
+
+  // ── QUICK SHORTCUTS ─────────────────────────
+  if (presets.length > 0) {
+    lines.push('');
+    lines.push(SEP_THIN);
+    lines.push('⚡ *QUICK SHORTCUTS (Klik tombol di bawah)*');
+    for (const p of presets) {
+      lines.push(`  ${p.categoryEmoji} *${p.categoryName}* ${formatCurrency(p.amount)} (${p.walletEmoji} ${p.walletName})`);
+    }
+  }
 
   // ── HARI INI ────────────────────────────────
   lines.push('');

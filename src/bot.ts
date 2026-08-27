@@ -1,4 +1,4 @@
-import { Bot, InlineKeyboard } from 'grammy';
+import { Bot } from 'grammy';
 import { config } from './config';
 import { ensureUserInitialized } from './services/user.service';
 import { handleTextInput } from './handlers/text.handler';
@@ -6,8 +6,9 @@ import { registerCommands } from './handlers/command.handler';
 import { registerCallbacks } from './handlers/callback.handler';
 import { startCronJobs } from './cron/jobs';
 import { buildWelcomeMessage } from './utils/formatter';
-import { mainMenuKeyboard } from './utils/keyboard';
+import { buildHomeKeyboard, mainMenuKeyboard } from './utils/keyboard';
 import { buildDashboard } from './services/dashboard.service';
+import { getTopPresets } from './services/preset.service';
 
 // ──────────────────────────────────────────────
 // Initialize bot
@@ -117,27 +118,21 @@ bot.command('help', async (ctx) => {
 
 bot.command('home', async (ctx) => {
   if (!ctx.from) return;
-  const dashboard = await buildDashboard(ctx.from.id);
-  const kb = new InlineKeyboard()
-    .text('📊 Laporan', 'menu:laporan')
-    .text('📈 Chart', 'menu:chart')
-    .row()
-    .text('💼 Dompet', 'menu:saldo')
-    .text('📤 Export', 'menu:export')
-    .row()
-    .text('📂 Menu', 'menu:full_menu');
+  const [dashboard, presets] = await Promise.all([
+    buildDashboard(ctx.from.id),
+    getTopPresets(ctx.from.id, 4),
+  ]);
+  const kb = buildHomeKeyboard(presets);
   await ctx.reply(dashboard, { parse_mode: 'Markdown', reply_markup: kb });
 });
 
 bot.command('dashboard', async (ctx) => {
   if (!ctx.from) return;
-  const dashboard = await buildDashboard(ctx.from.id);
-  const kb = new InlineKeyboard()
-    .text('📊 Laporan', 'menu:laporan')
-    .text('📈 Chart', 'menu:chart')
-    .row()
-    .text('💼 Dompet', 'menu:saldo')
-    .text('📤 Export', 'menu:export');
+  const [dashboard, presets] = await Promise.all([
+    buildDashboard(ctx.from.id),
+    getTopPresets(ctx.from.id, 4),
+  ]);
+  const kb = buildHomeKeyboard(presets);
   await ctx.reply(dashboard, { parse_mode: 'Markdown', reply_markup: kb });
 });
 
