@@ -61,43 +61,114 @@ export function parseAmount(raw: string): number | null {
 }
 
 // ─────────────────────────────────────────────────────────
-// FLEXIBLE TEXT INPUT PARSER
+// DAMERAU-LEVENSHTEIN FUZZY MATCHING
+// Menghitung edit distance (termasuk QWERTY typo & swapped chars)
+// ─────────────────────────────────────────────────────────
+
+export function damerauLevenshteinDistance(a: string, b: string): number {
+  if (a === b) return 0;
+  if (!a.length) return b.length;
+  if (!b.length) return a.length;
+
+  const lenA = a.length;
+  const lenB = b.length;
+  const matrix: number[][] = [];
+
+  for (let i = 0; i <= lenA; i++) {
+    matrix[i] = [i];
+  }
+  for (let j = 0; j <= lenB; j++) {
+    matrix[0]![j] = j;
+  }
+
+  for (let i = 1; i <= lenA; i++) {
+    for (let j = 1; j <= lenB; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+
+      matrix[i]![j] = Math.min(
+        matrix[i - 1]![j]! + 1, // Deletion
+        matrix[i]![j - 1]! + 1, // Insertion
+        matrix[i - 1]![j - 1]! + cost // Substitution
+      );
+
+      if (
+        i > 1 &&
+        j > 1 &&
+        a[i - 1] === b[j - 2] &&
+        a[i - 2] === b[j - 1]
+      ) {
+        matrix[i]![j] = Math.min(
+          matrix[i]![j]!,
+          matrix[i - 2]![j - 2]! + cost // Transposition (misal: "kelaur" -> "keluar")
+        );
+      }
+    }
+  }
+
+  return matrix[lenA]![lenB]!;
+}
+
+const EXPENSE_KEYWORDS = ['keluar', 'pengeluaran', 'bayar', 'beli'];
+const INCOME_KEYWORDS = ['masuk', 'pemasukan', 'dapat', 'terima'];
+const TRANSFER_KEYWORDS = ['transfer', 'tf', 'trsf'];
+
+export function isFuzzyMatch(token: string, targets: string[], maxDistance = 2): boolean {
+  const t = token.toLowerCase().trim();
+  for (const target of targets) {
+    if (t === target) return true;
+    const allowedDist = target.length <= 4 ? 1 : maxDistance;
+    if (damerauLevenshteinDistance(t, target) <= allowedDist) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// ─────────────────────────────────────────────────────────
+// FLEXIBLE & FUZZY TEXT INPUT PARSER
 // ─────────────────────────────────────────────────────────
 
 export function parseTextInput(text: string): ParsedInput | null {
   const trimmed = text.trim();
-
-  // 1. TRANSFER WITH OPTIONAL DESCRIPTION
-  // Format: transfer <nominal> dari <dompetA> ke <dompetB> [keterangan...]
-  const transferMatch = /^transfer\s+(\S+)\s+dari\s+(\S+)\s+ke\s+(\S+)(?:\s+(.+))?$/i.exec(trimmed);
-  if (transferMatch) {
-    const amount = parseAmount(transferMatch[1] ?? '');
-    if (!amount) return null;
-    return {
-      type: 'transfer',
-      amount,
-      walletName: (transferMatch[2] ?? '').toLowerCase(),
-      toWalletName: (transferMatch[3] ?? '').toLowerCase(),
-      description: transferMatch[4]?.trim() || undefined,
-    };
-  }
-
-  // 2. EXPENSE & INCOME WITH PREFIX
-  const expensePrefixMatch = /^(?:keluar|pengeluaran|bayar|beli)\s+(.+)$/i.exec(trimmed);
-  const incomePrefixMatch = /^(?:masuk|pemasukan|dapat|terima)\s+(.+)$/i.exec(trimmed);
-
-  if (expensePrefixMatch) {
-    const tokens = expensePrefixMatch[1]!.trim().split(/\s+/);
-    return parseFlexTransaction('expense', tokens);
-  }
-
-  if (incomePrefixMatch) {
-    const tokens = incomePrefixMatch[1]!.trim().split(/\s+/);
-    return parseFlexTransaction('income', tokens);
-  }
-
-  // 3. FALLBACK WITHOUT PREFIX (misal: "30rb makan cash dipinjam" atau "makan 30rb cash dipinjam")
   const tokens = trimmed.split(/\s+/);
+  if (tokens.length === 0 || !tokens[0]) return null;
+
+  const firstWord = tokens[0].toLowerCase();
+
+  // 1. FUZZY TRANSFER MATCHING
+  // Misal: "transfer 50rb dari bca ke cash dipinjam" atau "trnsfer 50k bca cash"
+  if (isFuzzyMatch(firstWord, TRANSFER_KEYWORDS)) {
+    // Standard regex transfer (transfer 50rb dari bca ke cash [keterangan])
+    const regMatch = /^\S+\s+(\S+)\s+(?:dari|drai|from)\s+(\S+)\s+(?:ke|k|to)\s+(\S+)(?:\s+(.+))?$/i.exec(trimmed);
+    if (regMatch) {
+      const amount = parseAmount(regMatch[1] ?? '');
+      if (amount) {
+        return {
+          type: 'transfer',
+          amount,
+          walletName: (regMatch[2] ?? '').toLowerCase(),
+          toWalletName: (regMatch[3] ?? '').toLowerCase(),
+          description: regMatch[4]?.trim() || undefined,
+        };
+      }
+    }
+
+    // Flexible fallback transfer token parsing
+    const parsedTransfer = parseFlexTransfer(tokens.slice(1));
+    if (parsedTransfer) return parsedTransfer;
+  }
+
+  // 2. FUZZY EXPENSE MATCHING (keluar, kelaur, kelusr, kelura, kleuar, pengeluaran, bayar, beli)
+  if (isFuzzyMatch(firstWord, EXPENSE_KEYWORDS)) {
+    return parseFlexTransaction('expense', tokens.slice(1));
+  }
+
+  // 3. FUZZY INCOME MATCHING (masuk, msuk, maksuk, mauk, pemasukan, dapat, terima)
+  if (isFuzzyMatch(firstWord, INCOME_KEYWORDS)) {
+    return parseFlexTransaction('income', tokens.slice(1));
+  }
+
+  // 4. FALLBACK WITHOUT PREFIX (misal: "30rb makan cash dipinjam" atau "makan 30rb cash dipinjam")
   if (tokens.length >= 3) {
     const parsedAsExpense = parseFlexTransaction('expense', tokens);
     if (parsedAsExpense) return parsedAsExpense;
@@ -149,6 +220,43 @@ function parseFlexTransaction(type: 'expense' | 'income', tokens: string[]): Par
     categoryName,
     amount: amountValue,
     walletName,
+    description: description || undefined,
+  };
+}
+
+function parseFlexTransfer(tokens: string[]): ParsedInput | null {
+  if (tokens.length < 3) return null;
+
+  let amountIndex = -1;
+  let amountValue = 0;
+
+  for (let i = 0; i < tokens.length; i++) {
+    const parsed = parseAmount(tokens[i]!);
+    if (parsed !== null && parsed > 0) {
+      amountIndex = i;
+      amountValue = parsed;
+      break;
+    }
+  }
+
+  if (amountIndex === -1) return null;
+
+  // Filter out filler words like "dari", "drai", "ke", "to", "from"
+  const cleanTokens = tokens
+    .filter((_, idx) => idx !== amountIndex)
+    .filter((t) => !['dari', 'drai', 'from', 'ke', 'k', 'to'].includes(t.toLowerCase()));
+
+  if (cleanTokens.length < 2) return null;
+
+  const walletName = cleanTokens[0]!.toLowerCase();
+  const toWalletName = cleanTokens[1]!.toLowerCase();
+  const description = cleanTokens.slice(2).join(' ').trim();
+
+  return {
+    type: 'transfer',
+    amount: amountValue,
+    walletName,
+    toWalletName,
     description: description || undefined,
   };
 }
