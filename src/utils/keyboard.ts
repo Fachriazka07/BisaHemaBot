@@ -60,3 +60,15 @@ export function suggestAddWalletKeyboard(walletName: string): InlineKeyboard {
     .text(`➕ Tambah Dompet ${walletName}`, `add_wallet:${walletName}`)
     .text('Batal', 'cancel_action');
 }
+
+/** Keyboard navigasi laporan keuangan */
+export function reportKeyboard(): InlineKeyboard {
+  return new InlineKeyboard()
+    .text('📅 Hari Ini', 'report:hari')
+    .text('⏮️ Kemarin', 'report:kemarin')
+    .row()
+    .text('📅 Minggu Ini', 'report:minggu')
+    .text('📅 Bulan Ini', 'report:bulan')
+    .row()
+    .text('📆 Pilih Tanggal', 'report:custom_prompt');
+}

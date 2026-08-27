@@ -6,6 +6,7 @@ import {
   buildTransferConfirm,
   buildWalletNotFoundMessage,
   buildSaldoMessage,
+  buildReportMessage,
   formatCurrency,
   formatProgressBar,
   MSG_INVALID_AMOUNT,
@@ -16,6 +17,7 @@ import {
   afterTransferKeyboard,
   suggestAddWalletKeyboard,
   mainMenuKeyboard,
+  reportKeyboard,
 } from '../utils/keyboard';
 import {
   createExpense,
@@ -467,6 +469,12 @@ async function handleAwaitingInput(
       }
       await upsertReminder(userId, h, m);
       await ctx.reply(`✅ Reminder diatur ke ${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')} WIB setiap hari.`);
+      return;
+    }
+    case 'report_custom_date': {
+      const report = await generateReport(userId, 'custom', input);
+      const msg = buildReportMessage(report);
+      await ctx.reply(msg, { parse_mode: 'Markdown', reply_markup: reportKeyboard() });
       return;
     }
     default:

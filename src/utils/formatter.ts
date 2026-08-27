@@ -154,6 +154,42 @@ export function buildSaldoMessage(wallets: Wallet[]): string {
   ].join('\n');
 }
 
+/** Format tampilan laporan keuangan (AI SaaS style) */
+export function buildReportMessage(report: {
+  period: string;
+  totalIncome: number;
+  totalExpense: number;
+  balance: number;
+  expenseByCategory: Array<{ category: string; emoji: string; amount: number; pct: number }>;
+  incomeByCategory: Array<{ category: string; emoji: string; amount: number; pct: number }>;
+}): string {
+  const lines = [
+    `📊 *LAPORAN KEUANGAN*`,
+    `🗓️ *${report.period}*`,
+    SEP,
+    `💚 *Pemasukan*      : ${formatCurrency(report.totalIncome)}`,
+    `❤️ *Pengeluaran*    : ${formatCurrency(report.totalExpense)}`,
+    `─────────────────────`,
+    `💰 *Selisih (Net)*  : *${report.balance >= 0 ? '+' : ''}${formatCurrency(report.balance)}*`,
+  ];
+
+  if (report.expenseByCategory.length > 0) {
+    lines.push('', '─── 💸 *PENGELUARAN PER KATEGORI* ───');
+    for (const c of report.expenseByCategory) {
+      lines.push(`${c.emoji} *${c.category.padEnd(12)}* : ${formatCurrency(c.amount)} (${c.pct}%)`);
+    }
+  }
+
+  if (report.incomeByCategory.length > 0) {
+    lines.push('', '─── 💚 *PEMASUKAN PER KATEGORI* ─────');
+    for (const c of report.incomeByCategory) {
+      lines.push(`${c.emoji} *${c.category.padEnd(12)}* : ${formatCurrency(c.amount)} (${c.pct}%)`);
+    }
+  }
+
+  return lines.join('\n');
+}
+
 /** Pesan welcome untuk user baru — AI SaaS style */
 export function buildWelcomeMessage(wallets: Wallet[]): string {
   const walletList = wallets.map((w) => `  ${w.emoji} *${w.name}* : ${formatCurrency(w.balance)}`).join('\n');

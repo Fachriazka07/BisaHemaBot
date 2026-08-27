@@ -33,8 +33,9 @@ import {
   buildSaldoMessage,
   formatProgressBar,
   formatDateTime,
+  buildReportMessage,
 } from '../utils/formatter';
-import { afterTransactionKeyboard } from '../utils/keyboard';
+import { afterTransactionKeyboard, reportKeyboard } from '../utils/keyboard';
 
 const SEP = '━━━━━━━━━━━━━━━━━━━━';
 
@@ -677,41 +678,29 @@ export function registerCallbacks(bot: Bot): void {
       }
 
       // ══════════════════════════════════════════
-      // ██ REPORT PERIOD
+      // ██ REPORT PERIOD & CUSTOM DATE
       // ══════════════════════════════════════════
 
+      if (data === 'report:custom_prompt') {
+        setAwaitingInput(userId, 'report_custom_date');
+        await safeEdit(
+          ctx,
+          `📆 *PILIH TANGGAL LAPORAN*\n${SEP}\nKetik tanggal atau rentang tanggal yang ingin kamu lihat:\n\n💡 *Contoh Format:*` +
+          `\n• \`26-08-2026\` (Tanggal tertentu)` +
+          `\n• \`26 agustus\` (Bulan ini)` +
+          `\n• \`20-08-2026 s/d 26-08-2026\` (Rentang tanggal)` +
+          `\n• \`kemarin\` (Laporan kemarin)`
+        );
+        await ctx.answerCallbackQuery();
+        return;
+      }
+
       if (data.startsWith('report:')) {
-        const period = data.replace('report:', '') as 'hari' | 'minggu' | 'bulan';
+        const period = data.replace('report:', '');
         const report = await generateReport(userId, period);
 
-        const lines = [
-          `📊 LAPORAN ${report.period}`,
-          SEP,
-          `💚 Pemasukan      ${formatCurrency(report.totalIncome)}`,
-          `❤️ Pengeluaran    ${formatCurrency(report.totalExpense)}`,
-          `─────────────────────`,
-          `💰 Selisih       ${report.balance >= 0 ? '+' : ''}${formatCurrency(report.balance)}`,
-        ];
-
-        if (report.expenseByCategory.length > 0) {
-          lines.push('', '─── PENGELUARAN PER KATEGORI ───');
-          for (const c of report.expenseByCategory) {
-            lines.push(`${c.emoji} ${c.category.padEnd(14)} ${formatCurrency(c.amount)}  ${c.pct}%`);
-          }
-        }
-
-        if (report.incomeByCategory.length > 0) {
-          lines.push('', '─── PEMASUKAN PER KATEGORI ─────');
-          for (const c of report.incomeByCategory) {
-            lines.push(`${c.emoji} ${c.category.padEnd(14)} ${formatCurrency(c.amount)}  ${c.pct}%`);
-          }
-        }
-
-        const kb = new InlineKeyboard()
-          .text('📅 Hari', 'report:hari')
-          .text('📅 Minggu', 'report:minggu')
-          .text('📅 Bulan', 'report:bulan');
-        await safeEdit(ctx, lines.join('\n'), { reply_markup: kb });
+        const msg = buildReportMessage(report);
+        await safeEdit(ctx, msg, { reply_markup: reportKeyboard(), parse_mode: 'Markdown' });
         await ctx.answerCallbackQuery();
         return;
       }

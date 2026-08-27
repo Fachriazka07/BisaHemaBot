@@ -14,7 +14,15 @@ export interface ReportData {
   incomeByCategory: Array<{ category: string; emoji: string; amount: number; pct: number }>;
 }
 
-function getDateRange(period: 'hari' | 'minggu' | 'bulan'): { start: Date; end: Date; label: string } {
+const MONTHS_ID = [
+  'JANUARI', 'FEBRUARI', 'MARET', 'APRIL', 'MEI', 'JUNI',
+  'JULI', 'AGUSTUS', 'SEPTEMBER', 'OKTOBER', 'NOVEMBER', 'DESEMBER'
+];
+
+function getDateRange(
+  period: string,
+  customInput?: string
+): { start: Date; end: Date; label: string } {
   const now = new Date();
   // Adjust to WIB (UTC+7)
   const wibOffset = 7 * 60 * 60 * 1000;
@@ -24,13 +32,28 @@ function getDateRange(period: 'hari' | 'minggu' | 'bulan'): { start: Date; end: 
   const m = wibNow.getUTCMonth();
   const d = wibNow.getUTCDate();
 
-  if (period === 'hari') {
-    const start = new Date(Date.UTC(y, m, d) - wibOffset);
-    const end = new Date(Date.UTC(y, m, d + 1) - wibOffset);
-    const label = `HARI INI — ${d} ${wibNow.toLocaleString('id-ID', { month: 'short' })} ${y}`;
+  const p = (period || 'bulan').toLowerCase().trim();
+
+  if (p === 'kemarin') {
+    const yestDate = new Date(wibNow.getTime() - 24 * 60 * 60 * 1000);
+    const yd = yestDate.getUTCDate();
+    const ym = yestDate.getUTCMonth();
+    const yy = yestDate.getUTCFullYear();
+
+    const start = new Date(Date.UTC(y, m, d - 1) - wibOffset);
+    const end = new Date(Date.UTC(y, m, d) - wibOffset);
+    const label = `KEMARIN — ${yd} ${MONTHS_ID[ym]} ${yy}`;
     return { start, end, label };
   }
-  if (period === 'minggu') {
+
+  if (p === 'hari' || p === 'hari ini') {
+    const start = new Date(Date.UTC(y, m, d) - wibOffset);
+    const end = new Date(Date.UTC(y, m, d + 1) - wibOffset);
+    const label = `HARI INI — ${d} ${MONTHS_ID[m]} ${y}`;
+    return { start, end, label };
+  }
+
+  if (p === 'minggu' || p === 'minggu ini') {
     const dayOfWeek = wibNow.getUTCDay(); // 0=Sun
     const mondayOffset = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
     const start = new Date(Date.UTC(y, m, d - mondayOffset) - wibOffset);
@@ -38,20 +61,118 @@ function getDateRange(period: 'hari' | 'minggu' | 'bulan'): { start: Date; end: 
     const label = `MINGGU INI`;
     return { start, end, label };
   }
-  // bulan
-  const start = new Date(Date.UTC(y, m, 1) - wibOffset);
-  const end = new Date(Date.UTC(y, m + 1, 1) - wibOffset);
-  const months = ['JANUARI', 'FEBRUARI', 'MARET', 'APRIL', 'MEI', 'JUNI',
-    'JULI', 'AGUSTUS', 'SEPTEMBER', 'OKTOBER', 'NOVEMBER', 'DESEMBER'];
-  const label = `${months[m]} ${y}`;
+
+  if (p === 'bulan' || p === 'bulan ini') {
+    const start = new Date(Date.UTC(y, m, 1) - wibOffset);
+    const end = new Date(Date.UTC(y, m + 1, 1) - wibOffset);
+    const label = `BULAN ${MONTHS_ID[m]} ${y}`;
+    return { start, end, label };
+  }
+
+  // Parse custom date or custom range
+  const targetStr = customInput || period;
+  return parseCustomDateRange(targetStr, wibNow, wibOffset);
+}
+
+function parseCustomDateRange(
+  input: string,
+  wibNow: Date,
+  wibOffset: number
+): { start: Date; end: Date; label: string } {
+  const str = input.trim().toLowerCase();
+
+  // Rentang Tanggal (misal: "20-08-2026 s/d 26-08-2026" atau "20/08/2026 - 26/08/2026")
+  const rangeMatch = str.split(/\s+(?:s\/d|sd|sampai|-|to)\s+/);
+  if (rangeMatch.length === 2) {
+    const d1 = parseSingleDate(rangeMatch[0]!, wibNow);
+    const d2 = parseSingleDate(rangeMatch[1]!, wibNow);
+    if (d1 && d2) {
+      const start = new Date(Date.UTC(d1.year, d1.month, d1.day) - wibOffset);
+      const end = new Date(Date.UTC(d2.year, d2.month, d2.day + 1) - wibOffset);
+      const label = `PERIODE ${d1.day} ${MONTHS_ID[d1.month]} ${d1.year} s/d ${d2.day} ${MONTHS_ID[d2.month]} ${d2.year}`;
+      return { start, end, label };
+    }
+  }
+
+  // Single Date (misal "26-08-2026" atau "26 agustus" atau "2026-08-26")
+  const single = parseSingleDate(str, wibNow);
+  if (single) {
+    const start = new Date(Date.UTC(single.year, single.month, single.day) - wibOffset);
+    const end = new Date(Date.UTC(single.year, single.month, single.day + 1) - wibOffset);
+    const label = `TANGGAL ${single.day} ${MONTHS_ID[single.month]} ${single.year}`;
+    return { start, end, label };
+  }
+
+  // Fallback to today if parsing fails
+  const y = wibNow.getUTCFullYear();
+  const m = wibNow.getUTCMonth();
+  const d = wibNow.getUTCDate();
+  const start = new Date(Date.UTC(y, m, d) - wibOffset);
+  const end = new Date(Date.UTC(y, m, d + 1) - wibOffset);
+  const label = `HARI INI — ${d} ${MONTHS_ID[m]} ${y}`;
   return { start, end, label };
+}
+
+function parseSingleDate(str: string, wibNow: Date): { year: number; month: number; day: number } | null {
+  const clean = str.trim().toLowerCase();
+
+  // YYYY-MM-DD or YYYY/MM/DD
+  const ymd = /^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/.exec(clean);
+  if (ymd) {
+    const year = parseInt(ymd[1]!, 10);
+    const month = parseInt(ymd[2]!, 10) - 1;
+    const day = parseInt(ymd[3]!, 10);
+    if (month >= 0 && month < 12 && day >= 1 && day <= 31) return { year, month, day };
+  }
+
+  // DD-MM-YYYY or DD/MM/YYYY or DD-MM-YY
+  const dmy = /^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})$/.exec(clean);
+  if (dmy) {
+    const day = parseInt(dmy[1]!, 10);
+    const month = parseInt(dmy[2]!, 10) - 1;
+    let year = parseInt(dmy[3]!, 10);
+    if (year < 100) year += 2000;
+    if (month >= 0 && month < 12 && day >= 1 && day <= 31) return { year, month, day };
+  }
+
+  // DD NamaBulan (YYYY) - e.g. "26 agustus" or "26 agustus 2026" or "26 aug 2026"
+  const monthMap: Record<string, number> = {
+    jan: 0, januari: 0,
+    feb: 1, februari: 1,
+    mar: 2, maret: 2,
+    apr: 3, april: 3,
+    mei: 4,
+    jun: 5, juni: 5,
+    jul: 6, juli: 6,
+    agu: 7, agustus: 7, ags: 7, aug: 7,
+    sep: 8, september: 8,
+    okt: 9, oktober: 9, oct: 9,
+    nov: 10, november: 10,
+    des: 11, desember: 11, dec: 11,
+  };
+
+  const textMatch = /^(\d{1,2})\s+([a-z]+)(?:\s+(\d{2,4}))?$/.exec(clean);
+  if (textMatch) {
+    const day = parseInt(textMatch[1]!, 10);
+    const mStr = textMatch[2]!;
+    let year = textMatch[3] ? parseInt(textMatch[3], 10) : wibNow.getUTCFullYear();
+    if (year < 100) year += 2000;
+
+    const month = monthMap[mStr];
+    if (month !== undefined && day >= 1 && day <= 31) {
+      return { year, month, day };
+    }
+  }
+
+  return null;
 }
 
 export async function generateReport(
   userId: number,
-  period: 'hari' | 'minggu' | 'bulan'
+  period: string = 'bulan',
+  customInput?: string
 ): Promise<ReportData> {
-  const { start, end, label } = getDateRange(period);
+  const { start, end, label } = getDateRange(period, customInput);
 
   // Fetch non-deleted transactions in period
   const { data: txs, error } = await supabase

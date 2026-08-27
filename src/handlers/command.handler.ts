@@ -9,8 +9,9 @@ import {
   formatDate,
   buildSaldoMessage,
   buildCancelConfirmMessage,
+  buildReportMessage,
 } from '../utils/formatter';
-import { confirmDeleteKeyboard } from '../utils/keyboard';
+import { confirmDeleteKeyboard, reportKeyboard } from '../utils/keyboard';
 import {
   getAllWallets,
   findWalletByName,
@@ -67,46 +68,13 @@ export function registerCommands(bot: Bot): void {
     await ctx.reply(buildSaldoMessage(wallets));
   });
 
-  // ── /laporan [hari|minggu|bulan] ─────────────
+  // ── /laporan [hari|kemarin|minggu|bulan|<tanggal>] ─────────────
   bot.command('laporan', async (ctx) => {
     if (!ctx.from) return;
-    const arg = ctx.match?.trim().toLowerCase() ?? '';
-    let period: 'hari' | 'minggu' | 'bulan' = 'bulan';
-    if (arg === 'hari' || arg === 'today') period = 'hari';
-    else if (arg === 'minggu' || arg === 'week') period = 'minggu';
-
-    const report = await generateReport(ctx.from.id, period);
-
-    const lines = [
-      `📊 LAPORAN ${report.period}`,
-      SEP,
-      `💚 Pemasukan      ${formatCurrency(report.totalIncome)}`,
-      `❤️ Pengeluaran    ${formatCurrency(report.totalExpense)}`,
-      `─────────────────────`,
-      `💰 Selisih       ${report.balance >= 0 ? '+' : ''}${formatCurrency(report.balance)}`,
-    ];
-
-    if (report.expenseByCategory.length > 0) {
-      lines.push('', '─── PENGELUARAN PER KATEGORI ───');
-      for (const c of report.expenseByCategory) {
-        lines.push(`${c.emoji} ${c.category.padEnd(14)} ${formatCurrency(c.amount)}  ${c.pct}%`);
-      }
-    }
-
-    if (report.incomeByCategory.length > 0) {
-      lines.push('', '─── PEMASUKAN PER KATEGORI ─────');
-      for (const c of report.incomeByCategory) {
-        lines.push(`${c.emoji} ${c.category.padEnd(14)} ${formatCurrency(c.amount)}  ${c.pct}%`);
-      }
-    }
-
-    const kb = new InlineKeyboard()
-      .text('📈 Chart', 'menu:chart')
-      .text('📅 Hari', 'report:hari')
-      .text('📅 Minggu', 'report:minggu')
-      .text('📅 Bulan', 'report:bulan');
-
-    await ctx.reply(lines.join('\n'), { reply_markup: kb });
+    const arg = ctx.match?.trim() ?? '';
+    const report = await generateReport(ctx.from.id, arg || 'bulan');
+    const msg = buildReportMessage(report);
+    await ctx.reply(msg, { parse_mode: 'Markdown', reply_markup: reportKeyboard() });
   });
 
   // ── /chart ───────────────────────────────────
