@@ -19,6 +19,9 @@ export const config = {
     url: requireEnv('SUPABASE_URL'),
     anonKey: requireEnv('SUPABASE_ANON_KEY'),
   },
+  gemini: {
+    apiKey: process.env['GEMINI_API_KEY'] ?? '', // Optional: OCR disabled if empty
+  },
   app: {
     nodeEnv: process.env['NODE_ENV'] ?? 'development',
     timezone: process.env['TIMEZONE'] ?? 'Asia/Jakarta',

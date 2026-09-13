@@ -15,7 +15,8 @@ export async function createExpense(
   walletName: string,
   categoryName: string,
   amount: number,
-  description?: string
+  description?: string,
+  customDate?: string
 ): Promise<TransactionResult> {
   // 1. Resolve wallet
   const wallet = await findWalletByName(userId, walletName);
@@ -25,16 +26,19 @@ export async function createExpense(
   const category = await findCategoryByName(userId, categoryName, 'expense' as CategoryType);
 
   // 3. Insert transaction
+  const insertData: Record<string, unknown> = {
+    user_id: userId,
+    wallet_id: wallet.id,
+    category_id: category?.id ?? null,
+    amount,
+    type: 'expense',
+    description: description ?? null,
+  };
+  if (customDate) insertData.created_at = customDate;
+
   const { data: tx, error } = await supabase
     .from('transactions')
-    .insert({
-      user_id: userId,
-      wallet_id: wallet.id,
-      category_id: category?.id ?? null,
-      amount,
-      type: 'expense',
-      description: description ?? null,
-    })
+    .insert(insertData)
     .select()
     .single();
 
@@ -60,23 +64,27 @@ export async function createIncome(
   walletName: string,
   categoryName: string,
   amount: number,
-  description?: string
+  description?: string,
+  customDate?: string
 ): Promise<TransactionResult> {
   const wallet = await findWalletByName(userId, walletName);
   if (!wallet) throw new WalletNotFoundError(walletName);
 
   const category = await findCategoryByName(userId, categoryName, 'income' as CategoryType);
 
+  const insertData: Record<string, unknown> = {
+    user_id: userId,
+    wallet_id: wallet.id,
+    category_id: category?.id ?? null,
+    amount,
+    type: 'income',
+    description: description ?? null,
+  };
+  if (customDate) insertData.created_at = customDate;
+
   const { data: tx, error } = await supabase
     .from('transactions')
-    .insert({
-      user_id: userId,
-      wallet_id: wallet.id,
-      category_id: category?.id ?? null,
-      amount,
-      type: 'income',
-      description: description ?? null,
-    })
+    .insert(insertData)
     .select()
     .single();
 
@@ -100,7 +108,8 @@ export async function createTransfer(
   fromWalletName: string,
   toWalletName: string,
   amount: number,
-  description?: string
+  description?: string,
+  customDate?: string
 ): Promise<TransactionResult> {
   const fromWallet = await findWalletByName(userId, fromWalletName);
   if (!fromWallet) throw new WalletNotFoundError(fromWalletName);
@@ -112,16 +121,19 @@ export async function createTransfer(
     throw new Error('Dompet asal dan tujuan tidak boleh sama.');
   }
 
+  const insertData: Record<string, unknown> = {
+    user_id: userId,
+    wallet_id: fromWallet.id,
+    to_wallet_id: toWallet.id,
+    amount,
+    type: 'transfer',
+    description: description ?? null,
+  };
+  if (customDate) insertData.created_at = customDate;
+
   const { data: tx, error } = await supabase
     .from('transactions')
-    .insert({
-      user_id: userId,
-      wallet_id: fromWallet.id,
-      to_wallet_id: toWallet.id,
-      amount,
-      type: 'transfer',
-      description: description ?? null,
-    })
+    .insert(insertData)
     .select()
     .single();
 

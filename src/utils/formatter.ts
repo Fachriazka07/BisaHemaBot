@@ -86,6 +86,7 @@ export function buildTransactionConfirm(opts: {
   wallet: Wallet;
   description?: string;
   createdAt: string;
+  isBackdated?: boolean;
 }): string {
   const isExpense = opts.type === 'expense';
   const tag = isExpense ? '💸 Pengeluaran' : '💚 Pemasukan';
@@ -94,7 +95,9 @@ export function buildTransactionConfirm(opts: {
     : '📦 Umum';
 
   const lines = [
-    `⚡ *Transaksi Berhasil Dicatat!*`,
+    opts.isBackdated
+      ? `⏪ *Transaksi Backdate Berhasil!*`
+      : `⚡ *Transaksi Berhasil Dicatat!*`,
     SEP,
     `🏷️ *Kategori* : ${catDisplay}`,
     `📊 *Tipe*     : ${tag}`,
@@ -108,6 +111,10 @@ export function buildTransactionConfirm(opts: {
 
   lines.push(`🕐 *Waktu*    : ${formatDateTime(opts.createdAt)}`);
 
+  if (opts.isBackdated) {
+    lines.push(`📅 _Tanggal disesuaikan (backdate)_`);
+  }
+
   return lines.join('\n');
 }
 
@@ -117,9 +124,13 @@ export function buildTransferConfirm(opts: {
   fromWallet: Wallet;
   toWallet: Wallet;
   description?: string;
+  isBackdated?: boolean;
+  createdAt?: string;
 }): string {
   const lines = [
-    `⚡ *Transfer Berhasil!*`,
+    opts.isBackdated
+      ? `⏪ *Transfer Backdate Berhasil!*`
+      : `⚡ *Transfer Berhasil!*`,
     SEP,
     `💸 *Dari*    : ${opts.fromWallet.emoji} ${opts.fromWallet.name} (Sisa: ${formatCurrency(opts.fromWallet.balance)})`,
     `📥 *Ke*      : ${opts.toWallet.emoji} ${opts.toWallet.name} (Total: ${formatCurrency(opts.toWallet.balance)})`,
@@ -128,6 +139,14 @@ export function buildTransferConfirm(opts: {
 
   if (opts.description) {
     lines.push(`📝 *Catatan* : ${opts.description}`);
+  }
+
+  if (opts.createdAt) {
+    lines.push(`🕐 *Waktu*   : ${formatDateTime(opts.createdAt)}`);
+  }
+
+  if (opts.isBackdated) {
+    lines.push(`📅 _Tanggal disesuaikan (backdate)_`);
   }
 
   return lines.join('\n');

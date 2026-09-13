@@ -15,10 +15,16 @@
     "lint": "eslint src --ext .ts",
     "format": "prettier --write src/**/*.ts"
   },
-  "keywords": ["telegram", "bot", "finance", "grammy"],
+  "keywords": [
+    "telegram",
+    "bot",
+    "finance",
+    "grammy"
+  ],
   "author": "Fachri",
   "license": "ISC",
   "dependencies": {
+    "@google/genai": "^2.22.0",
     "@supabase/supabase-js": "^2.112.3",
     "dotenv": "^17.4.2",
     "grammy": "^1.45.1",

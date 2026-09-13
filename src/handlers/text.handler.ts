@@ -103,7 +103,8 @@ export async function handleTextInput(ctx: Context): Promise<void> {
         parsed.walletName,
         parsed.categoryName ?? 'lainnya',
         parsed.amount,
-        parsed.description
+        parsed.description,
+        parsed.customDate
       );
 
       const msg = buildTransactionConfirm({
@@ -113,6 +114,7 @@ export async function handleTextInput(ctx: Context): Promise<void> {
         wallet: result.wallet,
         description: parsed.description,
         createdAt: result.transaction.created_at,
+        isBackdated: !!parsed.customDate,
       });
 
       await ctx.reply(msg, {
@@ -124,7 +126,8 @@ export async function handleTextInput(ctx: Context): Promise<void> {
         parsed.walletName,
         parsed.categoryName ?? 'lainnya',
         parsed.amount,
-        parsed.description
+        parsed.description,
+        parsed.customDate
       );
 
       const msg = buildTransactionConfirm({
@@ -134,6 +137,7 @@ export async function handleTextInput(ctx: Context): Promise<void> {
         wallet: result.wallet,
         description: parsed.description,
         createdAt: result.transaction.created_at,
+        isBackdated: !!parsed.customDate,
       });
 
       await ctx.reply(msg, {
@@ -147,7 +151,8 @@ export async function handleTextInput(ctx: Context): Promise<void> {
         parsed.walletName,
         parsed.toWalletName,
         parsed.amount,
-        parsed.description
+        parsed.description,
+        parsed.customDate
       );
 
       const msg = buildTransferConfirm({
@@ -155,6 +160,8 @@ export async function handleTextInput(ctx: Context): Promise<void> {
         fromWallet: result.wallet,
         toWallet: result.toWallet!,
         description: parsed.description,
+        isBackdated: !!parsed.customDate,
+        createdAt: result.transaction.created_at,
       });
 
       await ctx.reply(msg, {

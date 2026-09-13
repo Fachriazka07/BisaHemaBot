@@ -2,6 +2,7 @@ import { Bot } from 'grammy';
 import { config } from './config';
 import { ensureUserInitialized } from './services/user.service';
 import { handleTextInput } from './handlers/text.handler';
+import { handlePhotoInput } from './handlers/photo.handler';
 import { registerCommands } from './handlers/command.handler';
 import { registerCallbacks } from './handlers/callback.handler';
 import { startCronJobs } from './cron/jobs';
@@ -75,10 +76,18 @@ bot.command('help', async (ctx) => {
     '📖 *DAFTAR PERINTAH*',
     '━━━━━━━━━━━━━━━━━━━━━━━━━━',
     '',
-    '─── *CATAT TRANSAKSI* ───────────',
+    '─── *CATAT TRANSAKSI* ─────────',
     '`keluar <kat> <nominal> <dompet>`',
     '`masuk <sumber> <nominal> <dompet>`',
     '`transfer <nominal> dari <A> ke <B>`',
+    '',
+    '─── *BACKDATE TRANSAKSI* ──────',
+    '`keluar makan 30rb cash kemarin`',
+    '`keluar makan 30rb bca tanggal 12 agustus`',
+    '`masuk gaji 5jt bca lusa`',
+    '',
+    '─── *SCAN STRUK* ─────────────',
+    '📸 Kirim foto struk → otomatis tercatat',
     '',
     '─── *DASHBOARD* ─────────────────',
     '/home — Ringkasan lengkap (dashboard)',
@@ -111,6 +120,7 @@ bot.command('help', async (ctx) => {
     '/menu — Menu dengan tombol',
     '',
     '💡 _Ketik tanpa /: home, saldo, menu, laporan, chart, budget, export, reset_',
+    '📸 _Kirim foto struk untuk scan otomatis!_',
   ].join('\n');
 
   await ctx.reply(helpText, { parse_mode: 'Markdown' });
@@ -165,6 +175,11 @@ registerCommands(bot);
 // Register all callback query handlers
 // ──────────────────────────────────────────────
 registerCallbacks(bot);
+
+// ──────────────────────────────────────────────
+// PHOTO HANDLER — Receipt scan (before text!)
+// ──────────────────────────────────────────────
+bot.on('message:photo', handlePhotoInput);
 
 // ──────────────────────────────────────────────
 // TEXT HANDLER — Quick text input (LAST!)

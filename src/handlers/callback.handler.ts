@@ -29,6 +29,7 @@ import { getExpensePieChartUrl } from '../services/chart.service';
 import { toggleReminder, getReminder } from '../services/reminder.service';
 import { getTopPresets } from '../services/preset.service';
 import { buildDashboard } from '../services/dashboard.service';
+import { getPendingScan, clearPendingScan } from './photo.handler';
 import { supabase } from '../db/client';
 import {
   formatCurrency,
@@ -36,6 +37,7 @@ import {
   formatProgressBar,
   formatDateTime,
   buildReportMessage,
+  buildTransactionConfirm,
 } from '../utils/formatter';
 import { afterTransactionKeyboard, reportKeyboard, buildHomeKeyboard } from '../utils/keyboard';
 
@@ -711,6 +713,62 @@ export function registerCallbacks(bot: Bot): void {
             show_alert: true,
           });
         }
+        return;
+      }
+
+      // ══════════════════════════════════════════
+      // ██ RECEIPT SCAN — Save / Cancel
+      // ══════════════════════════════════════════
+
+      if (data.startsWith('scan_save:')) {
+        const walletName = data.replace('scan_save:', '').toLowerCase();
+        const scanResult = getPendingScan(userId);
+
+        if (!scanResult) {
+          await ctx.answerCallbackQuery({ text: '⏱️ Scan sudah expired. Kirim foto lagi.', show_alert: true });
+          try { await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }); } catch { /* ignore */ }
+          return;
+        }
+
+        try {
+          const createFn = scanResult.type === 'income' ? createIncome : createExpense;
+          const result = await createFn(
+            userId,
+            walletName,
+            scanResult.category,
+            scanResult.amount,
+            [scanResult.merchant, scanResult.description].filter(Boolean).join(' — '),
+            scanResult.date
+          );
+
+          clearPendingScan(userId);
+
+          const msg = buildTransactionConfirm({
+            type: scanResult.type,
+            category: result.category ?? null,
+            amount: scanResult.amount,
+            wallet: result.wallet,
+            description: [scanResult.merchant, scanResult.description].filter(Boolean).join(' — '),
+            createdAt: result.transaction.created_at,
+            isBackdated: !!scanResult.date,
+          });
+
+          await safeEdit(ctx, `📸 ${msg}`, {
+            parse_mode: 'Markdown',
+            reply_markup: afterTransactionKeyboard(result.transaction.id),
+          });
+          await ctx.answerCallbackQuery({ text: '✅ Transaksi dari struk berhasil dicatat!' });
+        } catch (err) {
+          const errMsg = err instanceof Error ? err.message : 'Gagal menyimpan transaksi.';
+          await ctx.answerCallbackQuery({ text: `❌ ${errMsg}`, show_alert: true });
+        }
+        return;
+      }
+
+      if (data === 'scan_cancel') {
+        clearPendingScan(userId);
+        await safeEdit(ctx, '❌ Scan struk dibatalkan.');
+        await ctx.answerCallbackQuery();
         return;
       }
 

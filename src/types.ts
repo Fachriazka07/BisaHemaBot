@@ -46,6 +46,7 @@ export interface ParsedInput {
   toWalletName?: string; // khusus transfer
   categoryName?: string; // khusus expense/income
   description?: string;
+  customDate?: string; // ISO string untuk backdate (kemarin, tanggal spesifik)
 }
 
 /** Data lengkap setelah transaksi berhasil disimpan */
