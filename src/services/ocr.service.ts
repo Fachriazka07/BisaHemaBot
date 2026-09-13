@@ -84,13 +84,13 @@ export function isOcrEnabled(): boolean {
  * List of fallback models to try if the configured model is unavailable
  */
 function getModelCandidates(): string[] {
-  const preferred = config.gemini.model || 'gemini-2.0-flash';
+  const preferred = config.gemini.model || 'gemini-3.5-flash-lite';
   const defaults = [
     preferred,
-    'gemini-2.0-flash',
-    'gemini-1.5-flash',
+    'gemini-3.5-flash-lite',
+    'gemini-3.5-flash',
     'gemini-2.5-flash',
-    'gemini-2.0-flash-lite',
+    'gemini-1.5-flash',
   ];
   // Deduplicate preserving order
   return Array.from(new Set(defaults.filter(Boolean)));
