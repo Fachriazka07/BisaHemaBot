@@ -21,6 +21,7 @@ export const config = {
   },
   gemini: {
     apiKey: process.env['GEMINI_API_KEY'] ?? '', // Optional: OCR disabled if empty
+    model: process.env['GEMINI_MODEL'] || 'gemini-2.0-flash',
   },
   app: {
     nodeEnv: process.env['NODE_ENV'] ?? 'development',

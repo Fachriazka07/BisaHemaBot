@@ -40,7 +40,7 @@ export function clearPendingScan(userId: number): void {
 
 // ─────────────────────────────────────────────────────────
 // PHOTO HANDLER
-// Handle user sending a photo to the bot
+// Handle user sending a photo (receipt / transfer proof / QRIS)
 // ─────────────────────────────────────────────────────────
 
 export async function handlePhotoInput(ctx: Context): Promise<void> {
@@ -50,9 +50,9 @@ export async function handlePhotoInput(ctx: Context): Promise<void> {
   // Check if OCR is enabled
   if (!isOcrEnabled()) {
     await ctx.reply(
-      '📸 Fitur scan struk belum aktif.\n\n' +
-      'Untuk mengaktifkan, tambahkan `GEMINI_API_KEY` di environment.\n' +
-      'Dapatkan key gratis di: https://aistudio.google.com/apikey',
+      '📸 *Fitur scan struk / bukti transfer belum aktif.*\n\n' +
+      'Untuk mengaktifkan, tambahkan `GEMINI_API_KEY` di file `.env` kamu.\n' +
+      'Dapatkan API Key gratis di: https://aistudio.google.com/apikey',
       { parse_mode: 'Markdown' }
     );
     return;
@@ -63,9 +63,11 @@ export async function handlePhotoInput(ctx: Context): Promise<void> {
   const bestPhoto = photos[photos.length - 1]!;
 
   // Send "processing" indicator
-  const processingMsg = await ctx.reply('🔍 *Memindai struk...*\nMohon tunggu, AI sedang menganalisis foto.', {
-    parse_mode: 'Markdown',
-  });
+  const processingMsg = await ctx.reply(
+    '🔍 *Menganalisis foto transaksi...*\n' +
+    'Mohon tunggu, AI sedang membaca struk / bukti transfer / QRIS kamu.',
+    { parse_mode: 'Markdown' }
+  );
 
   try {
     // Download photo from Telegram
@@ -90,19 +92,37 @@ export async function handlePhotoInput(ctx: Context): Promise<void> {
     };
     const mimeType = mimeMap[ext] ?? 'image/jpeg';
 
-    // Scan with Gemini Vision
+    // Scan with Gemini Vision AI (with auto-fallback)
     const result = await scanReceipt(base64, mimeType);
 
     // Store pending scan
     pendingScans.set(userId, { result, timestamp: Date.now() });
 
-    // Build wallet selection keyboard
+    // Build wallet selection keyboard with smart auto-sorting
     const wallets = await getAllWallets(userId);
     const kb = new InlineKeyboard();
 
+    // Sort wallets: if suggestedWallet is detected (e.g. "bca" or "dana"), move matching wallet to front
+    const sortedWallets = [...wallets].sort((a, b) => {
+      if (!result.suggestedWallet) return 0;
+      const sug = result.suggestedWallet.toLowerCase();
+      const aMatch = a.name.toLowerCase().includes(sug) || sug.includes(a.name.toLowerCase());
+      const bMatch = b.name.toLowerCase().includes(sug) || sug.includes(b.name.toLowerCase());
+      if (aMatch && !bMatch) return -1;
+      if (!aMatch && bMatch) return 1;
+      return 0;
+    });
+
     // Add wallet buttons (max 3 per row)
-    for (let i = 0; i < wallets.length; i++) {
-      kb.text(`${wallets[i]!.emoji} ${wallets[i]!.name}`, `scan_save:${wallets[i]!.name}`);
+    for (let i = 0; i < sortedWallets.length; i++) {
+      const w = sortedWallets[i]!;
+      const isSuggested =
+        result.suggestedWallet &&
+        (w.name.toLowerCase().includes(result.suggestedWallet) ||
+          result.suggestedWallet.includes(w.name.toLowerCase()));
+      const label = isSuggested ? `⭐ ${w.emoji} ${w.name}` : `${w.emoji} ${w.name}`;
+
+      kb.text(label, `scan_save:${w.name}`);
       if ((i + 1) % 3 === 0) kb.row();
     }
     kb.row().text('❌ Batal', 'scan_cancel');
@@ -114,25 +134,38 @@ export async function handlePhotoInput(ctx: Context): Promise<void> {
     const typeLabel = result.type === 'expense' ? '💸 Pengeluaran' : '💚 Pemasukan';
     const categoryEmoji = getCategoryEmoji(result.category);
 
+    const sourceLabel = getSourceTypeLabel(result.sourceType);
+
     const lines = [
-      `📸 *SCAN STRUK BERHASIL!*`,
+      `📸 *SCAN TRANSAKSI BERHASIL!*`,
       SEP,
-      ``,
-      `🏪 *Merchant*  : ${result.merchant}`,
-      `📊 *Tipe*      : ${typeLabel}`,
-      `${categoryEmoji} *Kategori*  : ${result.category}`,
-      `💰 *Nominal*   : *${formatCurrency(result.amount)}*`,
+      `${sourceLabel}`,
+      `🏷️ *Tujuan/Merchant* : ${result.merchant}`,
+      `📊 *Tipe*            : ${typeLabel}`,
+      `${categoryEmoji} *Kategori*        : ${result.category}`,
+      `💰 *Nominal*         : *${formatCurrency(result.amount)}*`,
     ];
 
     if (result.description) {
-      lines.push(`📝 *Catatan*   : ${result.description}`);
+      lines.push(`📝 *Catatan*         : ${result.description}`);
+    }
+
+    if (result.suggestedWallet) {
+      lines.push(`💡 *Deteksi Sumber*  : ${result.suggestedWallet.toUpperCase()}`);
     }
 
     if (result.date) {
-      lines.push(`📅 *Tanggal*   : ${new Date(result.date).toLocaleDateString('id-ID', { timeZone: 'Asia/Jakarta', day: 'numeric', month: 'long', year: 'numeric' })}`);
+      lines.push(
+        `📅 *Tanggal*         : ${new Date(result.date).toLocaleDateString('id-ID', {
+          timeZone: 'Asia/Jakarta',
+          day: 'numeric',
+          month: 'long',
+          year: 'numeric',
+        })}`
+      );
     }
 
-    lines.push(`${confEmoji} *Akurasi*   : ${confLabel}`);
+    lines.push(`${confEmoji} *Akurasi*         : ${confLabel}`);
     lines.push(``, `💼 *Simpan ke dompet mana?*`);
 
     // Edit processing message with results
@@ -151,18 +184,37 @@ export async function handlePhotoInput(ctx: Context): Promise<void> {
       });
     }
   } catch (err) {
-    const errMsg = err instanceof Error ? err.message : 'Terjadi kesalahan saat memindai struk.';
+    const errMsg = err instanceof Error ? err.message : 'Terjadi kesalahan saat memindai gambar.';
 
     try {
       await ctx.api.editMessageText(
         ctx.chat!.id,
         processingMsg.message_id,
-        `❌ *Scan Gagal*\n${SEP}\n${errMsg}\n\n💡 Tips: Pastikan foto struk jelas, tidak buram, dan terlihat angka totalnya.`,
+        `❌ *Scan Gagal*\n${SEP}\n${errMsg}\n\n💡 Tips: Pastikan foto struk, mutasi, atau bukti transfer jelas dan nominal terlihat.`,
         { parse_mode: 'Markdown' }
       );
     } catch {
       await ctx.reply(`❌ ${errMsg}`);
     }
+  }
+}
+
+/**
+ * Get human friendly label for source type
+ */
+function getSourceTypeLabel(sourceType?: ReceiptScanResult['sourceType']): string {
+  switch (sourceType) {
+    case 'bank_transfer':
+      return '🏦 *Sumber*: M-Banking / Transfer Bank';
+    case 'ewallet':
+      return '📱 *Sumber*: E-Wallet (DANA / GoPay / OVO)';
+    case 'qris':
+      return '🔳 *Sumber*: Pembayaran QRIS';
+    case 'invoice':
+      return '📄 *Sumber*: Tagihan / Invoice';
+    case 'receipt':
+    default:
+      return '🧾 *Sumber*: Struk Belanja / Resto';
   }
 }
 
@@ -182,6 +234,7 @@ function getCategoryEmoji(category: string): string {
     tagihan: '📄',
     groceries: '🛒',
     subscription: '📱',
+    transfer: '🔄',
     lainnya: '📦',
   };
   return map[category.toLowerCase()] ?? '🏷️';
